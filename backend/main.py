@@ -406,6 +406,155 @@ async def get_account_info():
         }
 
 
+# ============== Test/Debug Routes ==============
+
+@app.post("/api/test/signal")
+async def create_test_signal(symbol: str = "BTCUSDT", direction: str = "LONG"):
+    """
+    [TESTING ONLY] Create a manual test signal to verify order execution.
+    DELETE THIS IN PRODUCTION!
+    """
+    from signals.trend_model import TrendSignal
+    from analysis.order_flow import AggressionSignal
+    from datetime import datetime
+    
+    # Get current price
+    klines = binance_ws.get_klines(symbol, settings.primary_timeframe, 5)
+    if not klines:
+        return {"error": f"No price data for {symbol}"}
+    
+    current_price = klines[-1].close
+    
+    # Calculate SL/TP based on direction
+    if direction.upper() == "LONG":
+        stop_loss = current_price * 0.995  # 0.5% SL
+        take_profit = current_price * 1.01  # 1% TP
+        impulse_start = current_price * 0.99
+        impulse_end = current_price
+    else:
+        stop_loss = current_price * 1.005  # 0.5% SL
+        take_profit = current_price * 0.99  # 1% TP
+        impulse_start = current_price * 1.01
+        impulse_end = current_price
+    
+    # Create mock aggression signal
+    mock_aggression = AggressionSignal(
+        timestamp=int(datetime.now().timestamp() * 1000),
+        symbol=symbol,
+        direction="BUY" if direction.upper() == "LONG" else "SELL",
+        strength=0.8,
+        cvd_confirming=True,
+        imbalance_count=3,
+        large_prints_count=2,
+        description="Test signal aggression"
+    )
+    
+    # Create test signal with correct fields
+    test_signal = TrendSignal(
+        timestamp=int(datetime.now().timestamp() * 1000),
+        symbol=symbol,
+        timeframe=settings.primary_timeframe,
+        direction=direction.upper(),
+        entry_price=current_price,
+        stop_loss=stop_loss,
+        take_profit=take_profit,
+        lvn_price=current_price,
+        poc_target=take_profit,
+        impulse_start=impulse_start,
+        impulse_end=impulse_end,
+        confidence=0.75,
+        aggression=mock_aggression,
+        market_state="trending_up" if direction.upper() == "LONG" else "trending_down",
+        risk_reward=2.0,
+        risk_percent=0.5
+    )
+    
+    # Process through signal manager
+    await signal_manager._handle_new_signal(symbol, test_signal)
+    
+    logger.warning(f"TEST SIGNAL CREATED: {symbol} {direction} @ {current_price}")
+    
+    return {
+        "status": "created",
+        "signal": {
+            "symbol": symbol,
+            "direction": direction.upper(),
+            "entry": current_price,
+            "stop_loss": stop_loss,
+            "take_profit": take_profit,
+            "confidence": 0.75
+        },
+        "message": "Test signal created. Check trading panel for execution."
+    }
+
+
+@app.get("/api/test/why-no-signals/{symbol}")
+async def diagnose_signals(symbol: str):
+    """
+    Debug endpoint to see why signals aren't being generated.
+    """
+    from analysis import market_state_analyzer, volume_profile_calculator, order_flow_analyzer
+    
+    klines = binance_ws.get_klines(symbol, settings.primary_timeframe, 100)
+    trades = binance_ws.get_recent_trades(symbol, 500)
+    
+    if not klines:
+        return {"error": "No kline data"}
+    
+    # Market state
+    market_analysis = market_state_analyzer.analyze(klines)
+    
+    # Volume profile
+    vp = volume_profile_calculator.calculate_from_klines(klines)
+    
+    # Check conditions
+    current_price = klines[-1].close
+    
+    # Find nearest LVN
+    nearest_lvn = None
+    lvn_distance = None
+    if vp.lvn_zones:
+        nearest_lvn = min(vp.lvn_zones, key=lambda x: abs(x[0] - current_price))
+        lvn_distance = abs(current_price - nearest_lvn[0]) / current_price * 100
+    
+    # Aggression
+    buy_agg = order_flow_analyzer.analyze_aggression(trades, symbol, "BUY") if trades else None
+    sell_agg = order_flow_analyzer.analyze_aggression(trades, symbol, "SELL") if trades else None
+    
+    return {
+        "symbol": symbol,
+        "current_price": current_price,
+        "checks": {
+            "1_market_out_of_balance": {
+                "required": True,
+                "actual": not market_analysis.is_balanced,
+                "state": market_analysis.state.value,
+                "confidence": float(market_analysis.confidence)
+            },
+            "2_lvn_zones_exist": {
+                "required": True,
+                "actual": len(vp.lvn_zones) > 0,
+                "count": len(vp.lvn_zones)
+            },
+            "3_price_at_lvn": {
+                "required": "< 0.5%",
+                "actual": f"{lvn_distance:.2f}%" if lvn_distance else "N/A",
+                "passes": lvn_distance < 0.5 if lvn_distance else False,
+                "nearest_lvn": nearest_lvn[0] if nearest_lvn else None
+            },
+            "4_aggression": {
+                "required": "> 0.4",
+                "buy_strength": float(buy_agg.strength) if buy_agg else 0,
+                "sell_strength": float(sell_agg.strength) if sell_agg else 0
+            }
+        },
+        "thresholds": {
+            "trend_confidence": settings.trend_confidence_threshold,
+            "reversion_confidence": settings.reversion_confidence_threshold
+        }
+    }
+
+
 # ============== WebSocket Routes ==============
 
 @app.websocket("/ws")

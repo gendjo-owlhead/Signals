@@ -33,7 +33,7 @@ class DailyStats:
 @dataclass
 class RiskLimits:
     """Configurable risk limits."""
-    max_position_size_usdt: float = 100.0
+    max_position_size_usdt: float = 110.0  # Minimum $100 required by Binance
     risk_per_trade_pct: float = 1.0
     max_concurrent_positions: int = 3
     daily_loss_limit_pct: float = 5.0

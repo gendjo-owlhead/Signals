@@ -83,7 +83,8 @@ class BinanceTrader:
     
     def _sign(self, params: dict) -> str:
         """Generate HMAC SHA256 signature."""
-        query_string = '&'.join(f"{k}={v}" for k, v in sorted(params.items()))
+        # Binance expects params in original order, NOT sorted
+        query_string = '&'.join(f"{k}={v}" for k, v in params.items())
         return hmac.new(
             self.api_secret.encode('utf-8'),
             query_string.encode('utf-8'),
@@ -113,8 +114,15 @@ class BinanceTrader:
             if method == 'GET':
                 async with session.get(url, params=params, headers=headers) as resp:
                     data = await resp.json()
-            else:
+            elif method == 'POST':
+                # Binance requires POST params in URL query string
                 async with session.post(url, params=params, headers=headers) as resp:
+                    data = await resp.json()
+            elif method == 'DELETE':
+                async with session.delete(url, params=params, headers=headers) as resp:
+                    data = await resp.json()
+            else:
+                async with session.request(method, url, params=params, headers=headers) as resp:
                     data = await resp.json()
             
             if 'code' in data and data['code'] < 0:
@@ -216,6 +224,21 @@ class BinanceTrader:
                 symbol=symbol,
                 error=f"Quantity {qty} below minimum {info['min_qty']}"
             )
+        
+        # Get current price to check minimum notional
+        price_data = await self._request('GET', '/fapi/v1/ticker/price', 
+                                         {'symbol': symbol}, signed=False)
+        if 'price' in price_data:
+            current_price = float(price_data['price'])
+            notional = qty * current_price
+            min_notional = 100.0  # Binance Futures minimum
+            
+            if notional < min_notional:
+                # Round up quantity to meet minimum
+                min_qty_needed = min_notional / current_price
+                qty = self._round_quantity(min_qty_needed + (10 ** -info['quantity_precision']), 
+                                          info['quantity_precision'])
+                logger.info(f"Quantity adjusted to {qty} to meet ${min_notional} minimum notional")
         
         params = {
             'symbol': symbol,

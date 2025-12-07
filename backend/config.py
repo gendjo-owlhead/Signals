@@ -57,7 +57,7 @@ class Settings(BaseSettings):
     
     # Trading Execution Settings
     trading_enabled: bool = Field(default=False, env="TRADING_ENABLED")
-    max_position_size_usdt: float = Field(default=100.0, env="MAX_POSITION_SIZE_USDT")
+    max_position_size_usdt: float = Field(default=110.0, env="MAX_POSITION_SIZE_USDT")
     risk_per_trade_pct: float = Field(default=1.0, env="RISK_PER_TRADE_PCT")
     max_concurrent_positions: int = Field(default=3, env="MAX_CONCURRENT_POSITIONS")
     daily_loss_limit_pct: float = Field(default=5.0, env="DAILY_LOSS_LIMIT_PCT")
