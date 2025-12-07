@@ -15,8 +15,19 @@ from data.binance_ws import Kline, Trade
 class HistoricalDataFetcher:
     """Fetch historical data from Binance REST API."""
     
-    def __init__(self):
-        self.base_url = get_api_url()
+    def __init__(self, use_mainnet: bool = False):
+        """
+        Initialize historical data fetcher.
+        
+        Args:
+            use_mainnet: If True, use mainnet for data (recommended for backtesting
+                        since testnet has limited historical data)
+        """
+        if use_mainnet:
+            # Use Spot mainnet for public data (no auth needed, more accessible)
+            self.base_url = "https://api.binance.com"
+        else:
+            self.base_url = get_api_url()
         self.session: Optional[aiohttp.ClientSession] = None
     
     async def _get_session(self) -> aiohttp.ClientSession:
