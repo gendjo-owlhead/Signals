@@ -1,0 +1,33 @@
+# Dependencies
+backend/venv/
+frontend/node_modules/
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+
+# Environment files with secrets
+backend/.env
+
+# Database
+*.db
+
+# IDE
+.vscode/
+.idea/
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Build outputs
+frontend/dist/
+
+# Logs
+*.log
+
+# Model data (can be regenerated)
+backend/data/models/
