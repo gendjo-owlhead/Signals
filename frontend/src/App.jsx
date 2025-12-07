@@ -15,6 +15,7 @@ import OrderFlowPanel from './components/OrderFlowPanel'
 import MarketStatePanel from './components/MarketState'
 import MLMetrics from './components/MLMetrics'
 import TradingPanel from './components/TradingPanel'
+import { TechnicalAnalysisWidget, MiniChartWidget, TopStoriesWidget } from './components/TradingViewWidgets'
 
 function App() {
   const [selectedSymbol, setSelectedSymbol] = useState('BTCUSDT')
@@ -106,6 +107,9 @@ function App() {
       <main className="main">
         {/* Left Column - Charts/Analysis */}
         <div className="left-column">
+          {/* Mini Chart - TradingView */}
+          <MiniChartWidget symbol={selectedSymbol} />
+          
           {/* Market State */}
           <MarketStatePanel analysis={currentAnalysis} symbol={selectedSymbol} />
           
@@ -124,6 +128,9 @@ function App() {
           
           {/* Order Flow */}
           <OrderFlowPanel orderFlow={orderFlow} symbol={selectedSymbol} />
+          
+          {/* Crypto News */}
+          <TopStoriesWidget />
         </div>
         
         {/* Right Column - Signals & Trading */}
@@ -136,6 +143,9 @@ function App() {
             onStopTrading={stopTrading}
             onClosePosition={closePosition}
           />
+          
+          {/* Technical Analysis - TradingView */}
+          <TechnicalAnalysisWidget symbol={selectedSymbol} />
           
           {/* Active Signal */}
           <SignalPanel signals={signals} symbol={selectedSymbol} />
