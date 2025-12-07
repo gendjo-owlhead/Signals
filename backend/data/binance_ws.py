@@ -267,6 +267,10 @@ class BinanceWebSocket:
                         
                         data = json.loads(message)
                         
+                        # Skip messages without order book data (status/connection messages)
+                        if 'bids' not in data or 'asks' not in data:
+                            continue
+                        
                         order_book = OrderBook(
                             symbol=symbol,
                             timestamp=data.get('E', int(datetime.now().timestamp() * 1000)),
