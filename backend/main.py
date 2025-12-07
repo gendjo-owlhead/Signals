@@ -83,6 +83,7 @@ async def lifespan(app: FastAPI):
     # Start trading engine (if enabled)
     if settings.trading_enabled:
         await order_executor.start()
+        risk_manager.kill_switch(True)  # Enable trading on startup
         logger.info("Trading Engine ENABLED - Will execute trades!")
     else:
         logger.info("Trading Engine disabled - Signal-only mode")
