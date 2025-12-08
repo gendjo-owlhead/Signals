@@ -436,6 +436,21 @@ class BinanceTrader:
         
         return True
     
+    async def get_order(self, symbol: str, order_id: str) -> Optional[dict]:
+        """Get order status."""
+        params = {
+            'symbol': symbol,
+            'orderId': order_id
+        }
+        
+        data = await self._request('GET', '/fapi/v1/order', params)
+        
+        if 'error' in data:
+            logger.error(f"Failed to get order {order_id}: {data['error']}")
+            return None
+            
+        return data
+    
     async def close_position(
         self,
         symbol: str,
@@ -446,6 +461,48 @@ class BinanceTrader:
         # To close: sell if long, buy if short
         side = "SELL" if direction == "LONG" else "BUY"
         return await self.place_market_order(symbol, side, quantity)
+
+    async def get_historical_klines(
+        self,
+        symbol: str,
+        interval: str,
+        limit: int = 100
+    ) -> List[dict]:
+        """
+        Fetch historical klines via REST API.
+        Used to seed the WebSocket buffer on startup.
+        """
+        params = {
+            'symbol': symbol,
+            'interval': interval,
+            'limit': limit
+        }
+        
+        data = await self._request('GET', '/fapi/v1/klines', params, signed=False)
+        
+        if isinstance(data, dict) and 'error' in data:
+            logger.error(f"Failed to fetch historical klines for {symbol}: {data['error']}")
+            return []
+            
+        # Format: [Open Time, Open, High, Low, Close, Volume, Close Time, ...]
+        klines = []
+        for k in data:
+            klines.append({
+                't': k[0],      # Open time
+                'o': k[1],      # Open
+                'h': k[2],      # High
+                'l': k[3],      # Low
+                'c': k[4],      # Close
+                'v': k[5],      # Volume
+                'T': k[6],      # Close time
+                'q': k[7],      # Quote volume
+                'n': k[8],      # Number of trades
+                'V': k[9],      # Taker buy volume
+                'Q': k[10],     # Taker buy quote volume
+                'x': True       # Historical candles are always closed
+            })
+            
+        return klines
 
 
 # Global instance

@@ -129,6 +129,42 @@ class BinanceWebSocket:
         """Start all WebSocket streams."""
         self.running = True
         
+        # Seed historical data
+        logger.info("Seeding historical data...")
+        from trading.binance_trader import binance_trader
+        
+        try:
+            for symbol in settings.trading_pairs:
+                for tf in settings.timeframes:
+                    history = await binance_trader.get_historical_klines(symbol, tf, limit=100)
+                    if history:
+                        # Convert to Kline objects
+                        klines = []
+                        for k in history:
+                            klines.append(Kline(
+                                symbol=symbol,
+                                interval=tf,
+                                open_time=k['t'],
+                                open=float(k['o']),
+                                high=float(k['h']),
+                                low=float(k['l']),
+                                close=float(k['c']),
+                                volume=float(k['v']),
+                                close_time=k['T'],
+                                quote_volume=float(k['q']),
+                                trades=k['n'],
+                                taker_buy_volume=float(k['V']),
+                                taker_buy_quote_volume=float(k['Q']),
+                                is_closed=True
+                            ))
+                        
+                        # Populate buffer
+                        self.klines[symbol][tf].extend(klines)
+                        logger.info(f"Seeded {len(klines)} historical candles for {symbol} {tf}")
+                        
+        except Exception as e:
+            logger.error(f"Failed to seed historical data: {e}")
+            
         tasks = []
         for symbol in settings.trading_pairs:
             # Aggregate trades stream for order flow

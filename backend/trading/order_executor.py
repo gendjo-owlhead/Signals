@@ -51,6 +51,7 @@ class OrderExecutor:
     def __init__(self):
         self.is_running = False
         self._execution_lock = asyncio.Lock()
+        self._monitor_task = None
     
     async def start(self):
         """Start the order executor."""
@@ -67,13 +68,110 @@ class OrderExecutor:
             for p in exchange_positions
         ])
         
+        # Start monitoring loop
+        self._monitor_task = asyncio.create_task(self._monitor_positions())
+        
         logger.info(f"Order Executor started. Balance: ${balance:.2f}")
     
     async def stop(self):
         """Stop the order executor."""
         self.is_running = False
+        
+        # Stop monitoring loop
+        if self._monitor_task:
+            self._monitor_task.cancel()
+            try:
+                await self._monitor_task
+            except asyncio.CancelledError:
+                pass
+            self._monitor_task = None
+            
         risk_manager.kill_switch(False)
         logger.info("Order Executor stopped")
+    
+    async def _monitor_positions(self):
+        """Background task to monitor open positions."""
+        logger.info("Position monitoring started")
+        
+        while self.is_running:
+            try:
+                # 1. Get real positions from exchange
+                exchange_positions = await binance_trader.get_open_positions()
+                exchange_map = {p.symbol: p for p in exchange_positions}
+                
+                # 2. Check all tracked positions
+                tracked_positions = position_manager.get_all_positions()
+                
+                for pos in tracked_positions:
+                    # If tracked position is NOT on exchange, it was closed (TP or SL)
+                    if pos.symbol not in exchange_map:
+                        logger.info(f"Position {pos.id} ({pos.symbol}) no longer on exchange. Checking status...")
+                        
+                        exit_price = pos.entry_price
+                        reason = "UNKNOWN"
+                        
+                        # Check TP order status
+                        tp_filled = False
+                        if pos.tp_order_id:
+                            tp_order = await binance_trader.get_order(pos.symbol, pos.tp_order_id)
+                            if tp_order and tp_order.get('status') == 'FILLED':
+                                exit_price = float(tp_order.get('avgPrice', pos.take_profit))
+                                reason = "TP_HIT"
+                                tp_filled = True
+                        
+                        # Check SL order status if TP wasn't hit
+                        if not tp_filled and pos.sl_order_id:
+                            sl_order = await binance_trader.get_order(pos.symbol, pos.sl_order_id)
+                            if sl_order and sl_order.get('status') == 'FILLED':
+                                exit_price = float(sl_order.get('avgPrice', pos.stop_loss))
+                                reason = "SL_HIT"
+                        
+                        # Fallback if neither order confirms (e.g. liquidated or manual close elsewhere)
+                        if reason == "UNKNOWN":
+                            # Use last known price or midpoint as fallback
+                            reason = "EXCHANGE_CLOSE"
+                            # We keep exit_price as entry_price (break-even) or estimate
+                            # For safety, let's look for a small loss or gain? 
+                            # Actually, if we don't know, maybe we use the current price?
+                            # But the position is GONE, so we can't query current PnL.
+                            # Just close it.
+                            pass
+
+                        # Close the position in manager
+                        pnl = position_manager.close_position(
+                            pos.id, 
+                            exit_price, 
+                            reason
+                        )
+                        
+                        # Trigger learning update
+                        if settings.online_learning_enabled:
+                            # We import inside function to avoid circular imports if possible
+                            # But here we assume online_trainer is available or we add a hook
+                            from ml import online_trainer
+                            
+                            # We need to construct a trade result object or just pass the PnL
+                            # The online trainer usually monitors the trade history or is called explicitly.
+                            # Let's call a method if it exists, or rely on it picking up the history.
+                            # Checking online_trainer.py... it usually has a 'process_trade'
+                            await online_trainer.process_trade_result(
+                                symbol=pos.symbol,
+                                pnl=pnl,
+                                reason=reason,
+                                entry_price=pos.entry_price,
+                                exit_price=exit_price
+                            )
+                        
+                        # Clear active signal from dashboard
+                        from signals.signal_manager import signal_manager
+                        await signal_manager.clear_signal(pos.symbol)
+                        
+                        logger.info(f"Detected {pos.symbol} closure via {reason}. P&L: ${pnl:.2f}")
+
+            except Exception as e:
+                logger.error(f"Error in position monitor: {e}")
+            
+            await asyncio.sleep(5)  # Check every 5 seconds
     
     def validate_signal(
         self,

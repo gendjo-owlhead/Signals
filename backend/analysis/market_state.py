@@ -179,22 +179,22 @@ class MarketStateAnalyzer:
         
         return MarketStateAnalysis(
             state=state,
-            confidence=confidence,
-            is_balanced=is_balanced,
-            balance_score=balance_score,
-            range_high=range_high,
-            range_low=range_low,
-            current_price=current_price,
-            price_in_range_pct=price_in_range,
-            momentum=momentum,
-            momentum_strength=momentum_strength,
-            poc=volume_profile.poc_price,
-            vah=volume_profile.vah,
-            val=volume_profile.val,
-            higher_highs=higher_highs,
-            higher_lows=higher_lows,
-            lower_highs=lower_highs,
-            lower_lows=lower_lows
+            confidence=float(confidence),
+            is_balanced=bool(is_balanced),
+            balance_score=float(balance_score),
+            range_high=float(range_high),
+            range_low=float(range_low),
+            current_price=float(current_price),
+            price_in_range_pct=float(price_in_range),
+            momentum=float(momentum),
+            momentum_strength=float(momentum_strength),
+            poc=float(volume_profile.poc_price),
+            vah=float(volume_profile.vah),
+            val=float(volume_profile.val),
+            higher_highs=int(higher_highs),
+            higher_lows=int(higher_lows),
+            lower_highs=int(lower_highs),
+            lower_lows=int(lower_lows)
         )
     
     def _calculate_balance_score(

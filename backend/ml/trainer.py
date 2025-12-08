@@ -213,6 +213,56 @@ class OnlineLearningTrainer:
             'overall_status': self._get_overall_status()
         }
     
+    async def process_trade_result(
+        self,
+        symbol: str,
+        pnl: float,
+        reason: str,
+        entry_price: float,
+        exit_price: float
+    ):
+        """
+        Process a completed trade result for learning.
+        
+        Called by OrderExecutor when a position is closed.
+        matches the trade to the most recent open signal and records the outcome.
+        """
+        logger.info(f"Processing trade result for {symbol}: P&L ${pnl:.2f} ({reason})")
+        
+        # 1. Find matching signal
+        # Since we don't store signal_id in position yet, we find the most recent open signal
+        recent_signals = await storage.get_signals(symbol=symbol, limit=5)
+        
+        # Find latest signal without outcome
+        target_signal = None
+        for sig in recent_signals:
+            if not sig.get('outcome'):
+                target_signal = sig
+                break
+        
+        if not target_signal:
+            logger.warning(f"No open signal found for {symbol} trade result. Learning skipped.")
+            return
+            
+        # 2. Determine outcome label
+        outcome = "BE"
+        if pnl > 0:
+            outcome = "WIN"
+        elif pnl < 0:
+            outcome = "LOSS"
+            
+        # 3. Update signal in DB
+        await storage.update_signal_outcome(
+            signal_id=target_signal['id'],
+            outcome=outcome,
+            outcome_pnl=pnl
+        )
+        
+        logger.info(f"Updated signal {target_signal['id']} outcome: {outcome}")
+        
+        # 4. Trigger immediate training check
+        await self._check_and_train()
+
     def _get_overall_status(self) -> str:
         """Get overall ML system status."""
         sig_metrics = signal_accuracy_model.get_metrics()
