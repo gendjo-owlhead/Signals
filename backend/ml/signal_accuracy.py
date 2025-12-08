@@ -269,7 +269,24 @@ class SignalAccuracyModel:
                 self.feature_weights = state.get('feature_weights', self.feature_weights)
                 self.metrics = state.get('metrics', self.metrics)
                 
-                logger.info(f"Signal accuracy model loaded: {self.metrics['total_signals']} signals")
+                # Restore outcomes for idempotency check
+                saved_outcomes = state.get('outcomes', [])
+                for o in saved_outcomes:
+                    self.outcomes.append(SignalOutcome(
+                        signal_id=o['signal_id'],
+                        symbol=o['symbol'],
+                        direction=o['direction'],
+                        entry_price=0,
+                        exit_price=0,
+                        pnl_percent=o.get('pnl_percent', 0),
+                        outcome=o['outcome'],
+                        confidence=o['confidence'],
+                        features={},
+                        model_type=o['model_type'],
+                        timestamp=o['timestamp']
+                    ))
+                
+                logger.info(f"Signal accuracy model loaded: {self.metrics['total_signals']} signals, {len(self.outcomes)} outcomes")
             except Exception as e:
                 logger.error(f"Failed to load model state: {e}")
 
