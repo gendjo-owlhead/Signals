@@ -15,6 +15,7 @@ from analysis.volume_profile import volume_profile_calculator
 from analysis.market_state import market_state_analyzer
 from signals.trend_model import trend_model, TrendSignal
 from signals.mean_reversion import mean_reversion_model, ReversionSignal
+from ml.trainer import online_trainer
 
 
 @dataclass
@@ -232,6 +233,28 @@ class SignalManager:
                 aggression_score=signal.aggression.strength
             )
             logger.info(f"{symbol}: Signal saved to database (ID: {signal_id})")
+            
+            # Record LVN touch for ML pattern learning
+            try:
+                online_trainer.record_lvn_touch(
+                    symbol=symbol,
+                    lvn_price=signal.lvn_price,
+                    touch_price=signal.entry_price,
+                    direction=signal.direction,
+                    context={
+                        'volume_ratio': 1.0,
+                        'cvd_value': signal.aggression.cvd_confirming if hasattr(signal.aggression, 'cvd_confirming') else 0,
+                        'order_flow_imbalance': signal.aggression.strength,
+                        'distance_to_poc': abs(signal.entry_price - signal.poc_target) / signal.entry_price,
+                        'market_state': getattr(signal, 'market_state', 'unknown'),
+                        'momentum': 0,
+                        'volatility': abs(signal.stop_loss - signal.entry_price) / signal.entry_price
+                    },
+                    reaction='pending'  # Will be updated when trade closes
+                )
+                logger.debug(f"{symbol}: LVN touch recorded for ML learning")
+            except Exception as e:
+                logger.error(f"Failed to record LVN touch: {e}")
         except Exception as e:
             logger.error(f"Failed to save signal: {e}")
         
@@ -311,6 +334,38 @@ class SignalManager:
         )
         
         self.analysis_snapshots[symbol] = snapshot
+        
+        # Record state observation for ML classifier (sample every ~10 updates to avoid over-sampling)
+        if not hasattr(self, '_state_sample_counter'):
+            self._state_sample_counter = {}
+        counter = self._state_sample_counter.get(symbol, 0) + 1
+        self._state_sample_counter[symbol] = counter
+        
+        if counter % 10 == 0:
+            try:
+                # Map market state to label: 0=balanced, 1=trending_up, 2=trending_down, 3=choppy
+                state_labels = {'balanced': 0, 'trending_up': 1, 'trending_down': 2, 'choppy': 3, 'breakout_up': 1, 'breakout_down': 2}
+                label = state_labels.get(market_analysis.state.value, 3)
+                
+                online_trainer.record_state_observation(
+                    symbol=symbol,
+                    features={
+                        'atr_ratio': 0.01,  # Would calculate from actual data
+                        'range_width': (vp.vah - vp.val) / klines[-1].close if vp.vah > vp.val else 0.02,
+                        'momentum': market_analysis.momentum,
+                        'volume_distribution': market_analysis.balance_score,
+                        'poc_crosses': 0,  # Would track from klines
+                        'vah_val_touches': 0,
+                        'higher_highs': market_analysis.higher_highs,
+                        'higher_lows': market_analysis.higher_lows,
+                        'lower_highs': market_analysis.lower_highs,
+                        'lower_lows': market_analysis.lower_lows
+                    },
+                    verified_label=label
+                )
+                logger.debug(f"{symbol}: State observation recorded for ML classifier")
+            except Exception as e:
+                logger.error(f"Failed to record state observation: {e}")
         
         # Broadcast analysis update
         update = SignalUpdate(

@@ -155,8 +155,8 @@ class MeanReversionGenerator:
         failed_breakout = market_state_analyzer.detect_failed_breakout(klines, balance_vp)
         
         if failed_breakout is None:
-            # Check for Range Rotation (Trade Valid Range Edges)
-            return self._check_range_rotation(klines, trades, symbol, balance_vp, current_price)
+            logger.debug(f"{symbol}: No failed breakout detected")
+            return None
             
         breakout_type = failed_breakout['type']
         is_failed_upside = breakout_type == 'failed_upside_breakout'
@@ -336,97 +336,6 @@ class MeanReversionGenerator:
         
         return reclaim_score + aggression_score + rr_score + precision_score
 
-    def _check_range_rotation(
-        self,
-        klines: List[Kline],
-        trades: List[Trade],
-        symbol: str,
-        vp: VolumeProfile,
-        current_price: float
-    ) -> Optional[ReversionSignal]:
-        """
-        Check for simple range rotation (ping-pong) setup.
-        Long at VAL, Short at VAH.
-        """
-        timestamp = int(datetime.now().timestamp() * 1000)
-        timeframe = klines[0].interval
-        
-        # 1. Check if price is at range edge
-        # Tolerance: 0.2% around edge
-        tolerance = current_price * 0.002
-        
-        at_val = abs(current_price - vp.val) < tolerance
-        at_vah = abs(current_price - vp.vah) < tolerance
-        
-        direction = None
-        if at_val:
-            direction = "LONG"
-            target_edge = vp.val
-        elif at_vah:
-            direction = "SHORT"
-            target_edge = vp.vah
-        else:
-            return None
-            
-        logger.info(f"{symbol}: Price at range edge {direction} node ({current_price})")
-        
-        # 2. Check Order Flow Aggression
-        trade_direction = "BUY" if direction == "LONG" else "SELL"
-        aggression = order_flow_analyzer.analyze_aggression(trades, symbol, trade_direction)
-        
-        if aggression.strength < 0.4:
-            logger.debug(f"{symbol}: Insufficient rotation aggression ({aggression.strength:.2f})")
-            return None
-            
-        # 3. Setup Trade
-        entry_price = current_price
-        take_profit = vp.poc_price
-        
-        # Stop Loss: Outside the range
-        sl_buffer = entry_price * 0.003  # 0.3% buffer
-        if direction == "LONG":
-            stop_loss = vp.val - sl_buffer
-        else:
-            stop_loss = vp.vah + sl_buffer
-            
-        # 4. Risk Calculation
-        risk = abs(entry_price - stop_loss)
-        reward = abs(take_profit - entry_price)
-        
-        if risk == 0: return None
-        
-        risk_reward = reward / risk
-        if risk_reward < 1.5:
-            logger.debug(f"{symbol}: Rotation RR too low ({risk_reward:.2f})")
-            return None
-            
-        # 5. Generate Signal
-        confidence = 0.6 + (aggression.strength * 0.2)  # Base 0.6 for rotation
-        
-        logger.info(
-            f"{symbol}: RANGE ROTATION SIGNAL - {direction} @ {entry_price:.2f} | "
-            f"SL: {stop_loss:.2f} | TP: {take_profit:.2f} | RR: {risk_reward:.2f}"
-        )
-        
-        return ReversionSignal(
-            timestamp=timestamp,
-            symbol=symbol,
-            timeframe=timeframe,
-            direction=direction,
-            entry_price=entry_price,
-            stop_loss=stop_loss,
-            take_profit=take_profit,
-            lvn_price=target_edge,  # Using edge as 'lvn' reference
-            poc_target=take_profit,
-            failed_breakout_price=target_edge, # Placeholder
-            value_area_high=vp.vah,
-            value_area_low=vp.val,
-            confidence=confidence,
-            aggression=aggression,
-            breakout_type="range_rotation",
-            risk_reward=risk_reward,
-            risk_percent=(risk/entry_price)*100
-        )
 
 
 # Global generator instance
