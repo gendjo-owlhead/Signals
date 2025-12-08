@@ -92,6 +92,11 @@ class SignalAccuracyModel:
         
         This is called when a signal's SL or TP is hit.
         """
+        # Idempotency check: Don't record if we already have this signal_id
+        if any(o.signal_id == outcome.signal_id for o in self.outcomes):
+            logger.warning(f"Signal {outcome.signal_id} outcome already recorded. Skipping.")
+            return
+
         self.outcomes.append(outcome)
         
         # Update metrics

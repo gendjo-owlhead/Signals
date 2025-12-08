@@ -15,7 +15,7 @@ import OrderFlowPanel from './components/OrderFlowPanel'
 import MarketStatePanel from './components/MarketState'
 import MLMetrics from './components/MLMetrics'
 import TradingPanel from './components/TradingPanel'
-import { TechnicalAnalysisWidget, MiniChartWidget } from './components/TradingViewWidgets'
+import { MiniChartWidget } from './components/TradingViewWidgets'
 
 function App() {
   const [selectedSymbol, setSelectedSymbol] = useState('BTCUSDT')
@@ -141,8 +141,7 @@ function App() {
             onClosePosition={closePosition}
           />
           
-          {/* Technical Analysis - TradingView */}
-          <TechnicalAnalysisWidget symbol={selectedSymbol} />
+
           
           {/* Active Signal */}
           <SignalPanel signals={signals} symbol={selectedSymbol} />
