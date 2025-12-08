@@ -50,6 +50,14 @@ class Settings(BaseSettings):
     trend_confidence_threshold: float = Field(default=0.7, env="TREND_CONF_THRESH")
     reversion_confidence_threshold: float = Field(default=0.7, env="REV_CONF_THRESH")
     
+    # TTFT Strategy Settings
+    ttft_trend_length: int = Field(default=20, env="TTFT_TREND_LENGTH")
+    ttft_atr_length: int = Field(default=200, env="TTFT_ATR_LENGTH")
+    ttft_atr_multiplier: float = Field(default=0.8, env="TTFT_ATR_MULT")
+    ttft_sl_multiplier: float = Field(default=1.0, env="TTFT_SL_MULT")
+    ttft_rr_ratio: float = Field(default=2.0, env="TTFT_RR_RATIO")
+    ttft_confidence_threshold: float = Field(default=0.7, env="TTFT_CONF_THRESH")
+    
     # ML Settings
     ml_model_path: str = Field(default="data/models", env="ML_MODEL_PATH")
     online_learning_enabled: bool = Field(default=True, env="ONLINE_LEARNING")

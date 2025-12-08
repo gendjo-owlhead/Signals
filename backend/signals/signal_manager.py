@@ -2,7 +2,7 @@
 Signal Manager - Aggregates and manages all signal generation.
 """
 import asyncio
-from typing import List, Dict, Optional, Union, Callable
+from typing import List, Dict, Optional, Callable
 from dataclasses import dataclass, field
 from datetime import datetime
 from collections import deque
@@ -13,8 +13,7 @@ from data.binance_ws import binance_ws, Kline, Trade
 from data.storage import storage
 from analysis.volume_profile import volume_profile_calculator
 from analysis.market_state import market_state_analyzer
-from signals.trend_model import trend_model, TrendSignal
-from signals.mean_reversion import mean_reversion_model, ReversionSignal
+from signals.ema_scalp import ema_scalp_generator, ScalpSignal
 from ml.trainer import online_trainer
 
 
@@ -180,25 +179,23 @@ class SignalManager:
         
         logger.debug(f"{symbol}: Running analysis...")
         
-        # Get recent trades for order flow
+        # EMA Scalp only profitable on BTC, skip ETH
+        if symbol != "BTCUSDT":
+            return
+        
+        # Get recent trades for order flow (kept for interface compatibility)
         trades = binance_ws.get_recent_trades(symbol, 500)
         
-        # Try Trend Model first
-        trend_signal = trend_model.generate_signal(klines, trades, symbol)
+        # Use EMA Scalping Strategy
+        scalp_signal = ema_scalp_generator.generate_signal(klines, trades, symbol)
         
-        if trend_signal and trend_signal.confidence >= settings.trend_confidence_threshold:
-            await self._handle_new_signal(symbol, trend_signal)
-        
-        # Try Mean Reversion Model
-        reversion_signal = mean_reversion_model.generate_signal(klines, trades, symbol)
-        
-        if reversion_signal and reversion_signal.confidence >= settings.reversion_confidence_threshold:
-            await self._handle_new_signal(symbol, reversion_signal)
+        if scalp_signal:
+            await self._handle_new_signal(symbol, scalp_signal)
     
     async def _handle_new_signal(
         self,
         symbol: str,
-        signal: Union[TrendSignal, ReversionSignal]
+        signal: ScalpSignal
     ):
         """Process and store a new signal."""
         
@@ -213,7 +210,7 @@ class SignalManager:
         self.signal_history[symbol].append(signal)
         
         # Store in database
-        signal_type = "TREND" if isinstance(signal, TrendSignal) else "MEAN_REVERSION"
+        signal_type = "EMA_SCALP"
         
         try:
             signal_id = await storage.save_signal(
@@ -226,35 +223,35 @@ class SignalManager:
                 take_profit=signal.take_profit,
                 confidence=signal.confidence,
                 model_type=signal_type,
-                market_state=getattr(signal, 'market_state', None),
-                lvn_price=signal.lvn_price,
-                poc_price=signal.poc_target,
-                cvd_value=getattr(signal.aggression, 'cvd_confirming', None),
-                aggression_score=signal.aggression.strength
+                market_state=f"EMA9={signal.ema_9:.2f}_EMA21={signal.ema_21:.2f}",
+                lvn_price=signal.ema_21,  # Use EMA 21 as support/resistance
+                poc_price=signal.take_profit,
+                cvd_value=signal.rsi,  # Store RSI value
+                aggression_score=signal.confidence
             )
             logger.info(f"{symbol}: Signal saved to database (ID: {signal_id})")
             
-            # Record LVN touch for ML pattern learning
+            # Record for ML pattern learning
             try:
                 online_trainer.record_lvn_touch(
                     symbol=symbol,
-                    lvn_price=signal.lvn_price,
+                    lvn_price=signal.ema_21,
                     touch_price=signal.entry_price,
                     direction=signal.direction,
                     context={
                         'volume_ratio': 1.0,
-                        'cvd_value': signal.aggression.cvd_confirming if hasattr(signal.aggression, 'cvd_confirming') else 0,
-                        'order_flow_imbalance': signal.aggression.strength,
-                        'distance_to_poc': abs(signal.entry_price - signal.poc_target) / signal.entry_price,
-                        'market_state': getattr(signal, 'market_state', 'unknown'),
-                        'momentum': 0,
-                        'volatility': abs(signal.stop_loss - signal.entry_price) / signal.entry_price
+                        'cvd_value': signal.rsi,
+                        'order_flow_imbalance': signal.confidence,
+                        'distance_to_poc': abs(signal.entry_price - signal.take_profit) / signal.entry_price,
+                        'market_state': 'SCALP',
+                        'momentum': signal.rsi - 50,
+                        'volatility': signal.risk_percent / 100
                     },
-                    reaction='pending'  # Will be updated when trade closes
+                    reaction='pending'
                 )
-                logger.debug(f"{symbol}: LVN touch recorded for ML learning")
+                logger.debug(f"{symbol}: Pattern recorded for ML learning")
             except Exception as e:
-                logger.error(f"Failed to record LVN touch: {e}")
+                logger.error(f"Failed to record pattern: {e}")
         except Exception as e:
             logger.error(f"Failed to save signal: {e}")
         

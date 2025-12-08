@@ -20,8 +20,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from loguru import logger
 from data.historical import HistoricalDataFetcher
 from data.binance_ws import Kline, Trade
-from signals.trend_model import TrendModelGenerator
-from signals.mean_reversion import MeanReversionGenerator
+from signals.ttft_strategy import TTFTGenerator
 from analysis.volume_profile import VolumeProfileCalculator
 from analysis.order_flow import OrderFlowAnalyzer
 from config import settings
@@ -40,7 +39,7 @@ class BacktestTrade:
     stop_loss: float
     take_profit: float
     confidence: float
-    model_type: str  # TREND or MEAN_REVERSION
+    model_type: str  # TTFT
     
     # Outcome (filled after simulation)
     exit_price: Optional[float] = None
@@ -73,10 +72,8 @@ class BacktestResult:
     profit_factor: float = 0.0
     
     # By model
-    trend_trades: int = 0
-    trend_wins: int = 0
-    reversion_trades: int = 0
-    reversion_wins: int = 0
+    ttft_trades: int = 0
+    ttft_wins: int = 0
     
     # Trade list
     trades: List[BacktestTrade] = field(default_factory=list)
@@ -88,16 +85,10 @@ class BacktestResult:
         return (self.wins / self.total_trades) * 100
     
     @property
-    def trend_win_rate(self) -> float:
-        if self.trend_trades == 0:
+    def ttft_win_rate(self) -> float:
+        if self.ttft_trades == 0:
             return 0.0
-        return (self.trend_wins / self.trend_trades) * 100
-    
-    @property
-    def reversion_win_rate(self) -> float:
-        if self.reversion_trades == 0:
-            return 0.0
-        return (self.reversion_wins / self.reversion_trades) * 100
+        return (self.ttft_wins / self.ttft_trades) * 100
 
 
 class Backtester:
@@ -110,16 +101,23 @@ class Backtester:
         symbol: str = "BTCUSDT",
         timeframe: str = "5m",
         confidence_threshold: float = 0.7,
-        lookback_periods: int = 100
+        lookback_periods: int = 50  # Scalping config (ATR 14 + buffer)
     ):
         self.symbol = symbol
         self.timeframe = timeframe
         self.confidence_threshold = confidence_threshold
         self.lookback_periods = lookback_periods
         
-        # Strategy generators
-        self.trend_model = TrendModelGenerator(confidence_threshold=confidence_threshold)
-        self.reversion_model = MeanReversionGenerator(confidence_threshold=confidence_threshold)
+        # Strategy generator - EMA SCALPING configuration
+        from signals.ema_scalp import EMAScalpGenerator
+        self.strategy = EMAScalpGenerator(
+            ema_fast=9,
+            ema_slow=21,
+            rsi_period=14,
+            rr_ratio=1.0,  # 1:1 R:R for faster exits
+            lookback_bars=5,
+            min_rsi_distance=3.0
+        )
         self.volume_profile = VolumeProfileCalculator()
         self.order_flow = OrderFlowAnalyzer()
         
@@ -244,24 +242,14 @@ class Backtester:
                 # Generate mock trades list (simplified - no real trades needed for signal gen)
                 mock_trades = self._generate_mock_trades(window)
                 
-                # Try Trend Model
-                trend_signal = self.trend_model.generate_signal(
+                # Try EMA Scalping Strategy
+                signal = self.strategy.generate_signal(
                     window, mock_trades, self.symbol
                 )
                 
-                if trend_signal and trend_signal.confidence >= self.confidence_threshold:
+                if signal:
                     result.total_signals += 1
-                    self._open_trade(trend_signal, current_kline, "TREND", result)
-                    continue
-                
-                # Try Mean Reversion Model
-                reversion_signal = self.reversion_model.generate_signal(
-                    window, mock_trades, self.symbol
-                )
-                
-                if reversion_signal and reversion_signal.confidence >= self.confidence_threshold:
-                    result.total_signals += 1
-                    self._open_trade(reversion_signal, current_kline, "MEAN_REVERSION", result)
+                    self._open_trade(signal, current_kline, "EMA_SCALP", result)
             
             # Progress
             if i % 1000 == 0:
@@ -325,11 +313,7 @@ class Backtester:
         
         self.active_trade = trade
         result.total_trades += 1
-        
-        if model_type == "TREND":
-            result.trend_trades += 1
-        else:
-            result.reversion_trades += 1
+        result.ttft_trades += 1
     
     def _check_exit(
         self, 
@@ -389,10 +373,7 @@ class Backtester:
         
         if trade.is_win:
             result.wins += 1
-            if trade.model_type == "TREND":
-                result.trend_wins += 1
-            else:
-                result.reversion_wins += 1
+            result.ttft_wins += 1
         else:
             result.losses += 1
         
@@ -464,10 +445,8 @@ def print_results(result: BacktestResult):
     print(f"Max Drawdown:     -{result.max_drawdown_pct:.2f}%")
     print()
     print("By Model:")
-    if result.trend_trades > 0:
-        print(f"  Trend Model:       {result.trend_win_rate:.1f}% win rate ({result.trend_trades} trades)")
-    if result.reversion_trades > 0:
-        print(f"  Mean Reversion:    {result.reversion_win_rate:.1f}% win rate ({result.reversion_trades} trades)")
+    if result.ttft_trades > 0:
+        print(f"  TTFT Model:        {result.ttft_win_rate:.1f}% win rate ({result.ttft_trades} trades)")
     print()
     
     # Show recent trades
@@ -502,10 +481,8 @@ def save_results(result: BacktestResult, filename: str):
         "avg_win_pct": result.avg_win_pct,
         "avg_loss_pct": result.avg_loss_pct,
         "max_drawdown_pct": result.max_drawdown_pct,
-        "trend_trades": result.trend_trades,
-        "trend_win_rate": result.trend_win_rate,
-        "reversion_trades": result.reversion_trades,
-        "reversion_win_rate": result.reversion_win_rate,
+        "ttft_trades": result.ttft_trades,
+        "ttft_win_rate": result.ttft_win_rate,
         "trades": [
             {
                 "timestamp": t.timestamp,
@@ -595,7 +572,7 @@ async def main():
                format="{time:HH:mm:ss} | {level:7} | {message}",
                level="INFO")
     
-    print(f"\n🎯 Auction Market Strategy Backtester")
+    print(f"\n🎯 TTFT Strategy Backtester")
     print(f"Symbol: {args.symbol} | Timeframe: {args.timeframe} | Days: {args.days}")
     print(f"Confidence Threshold: {args.confidence}")
     if args.train:
