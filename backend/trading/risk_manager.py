@@ -37,7 +37,7 @@ class RiskLimits:
     risk_per_trade_pct: float = 1.0
     max_concurrent_positions: int = 3
     daily_loss_limit_pct: float = 5.0
-    min_signal_confidence: float = 0.7
+    min_signal_confidence: float = 0.50
     cooldown_after_losses: int = 3  # Pause after N consecutive losses
     cooldown_minutes: int = 30
 

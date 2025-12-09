@@ -44,30 +44,29 @@ class TestConfigLoading:
 class TestSignalModels:
     """Test signal generation models initialize correctly."""
     
-    def test_trend_model_import(self):
-        """TrendModelGenerator should import."""
-        from signals.trend_model import TrendModelGenerator
-        assert TrendModelGenerator is not None
+    def test_scalper_generator_import(self):
+        """ScalperGenerator should import."""
+        from signals.scalper_strategy import ScalperGenerator
+        assert ScalperGenerator is not None
     
-    def test_trend_model_init(self):
-        """TrendModelGenerator should initialize with defaults."""
-        from signals.trend_model import TrendModelGenerator
+    def test_scalper_generator_init(self):
+        """ScalperGenerator should initialize with defaults."""
+        from signals.scalper_strategy import ScalperGenerator
         
-        generator = TrendModelGenerator()
+        generator = ScalperGenerator()
         assert generator is not None
-        assert generator.min_risk_reward >= 1.0
+        assert generator.rr_ratio >= 1.0
     
-    def test_mean_reversion_import(self):
-        """MeanReversionGenerator should import."""
-        from signals.mean_reversion import MeanReversionGenerator
-        assert MeanReversionGenerator is not None
+    def test_scalper_signal_import(self):
+        """ScalperSignal should import."""
+        from signals.scalper_strategy import ScalperSignal
+        assert ScalperSignal is not None
     
-    def test_mean_reversion_init(self):
-        """MeanReversionGenerator should initialize with defaults."""
-        from signals.mean_reversion import MeanReversionGenerator
-        
-        generator = MeanReversionGenerator()
-        assert generator is not None
+    def test_global_scalper_generator(self):
+        """Global scalper_generator instance should be available."""
+        from signals.scalper_strategy import scalper_generator
+        assert scalper_generator is not None
+        assert scalper_generator.ema_fast > 0
 
 
 class TestMLModels:

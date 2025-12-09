@@ -69,7 +69,7 @@ class Settings(BaseSettings):
     risk_per_trade_pct: float = Field(default=1.0, env="RISK_PER_TRADE_PCT")
     max_concurrent_positions: int = Field(default=3, env="MAX_CONCURRENT_POSITIONS")
     daily_loss_limit_pct: float = Field(default=5.0, env="DAILY_LOSS_LIMIT_PCT")
-    min_signal_confidence: float = Field(default=0.7, env="MIN_SIGNAL_CONFIDENCE")
+    min_signal_confidence: float = Field(default=0.50, env="MIN_SIGNAL_CONFIDENCE")
     
     # Server Settings
     host: str = Field(default="0.0.0.0", env="HOST")

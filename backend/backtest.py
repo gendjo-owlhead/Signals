@@ -1,6 +1,5 @@
 """
-Backtesting script for Auction Market Strategy.
-Tests Trend Model and Mean Reversion Model on historical data.
+Backtesting script for EMA 5-8-13 Scalping Strategy.
 
 Usage:
     python backtest.py --symbol BTCUSDT --days 30
@@ -20,7 +19,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from loguru import logger
 from data.historical import HistoricalDataFetcher
 from data.binance_ws import Kline, Trade
-from signals.ttft_strategy import TTFTGenerator
+from signals.scalper_strategy import ScalperGenerator, ScalperSignal
 from analysis.volume_profile import VolumeProfileCalculator
 from analysis.order_flow import OrderFlowAnalyzer
 from config import settings
@@ -39,7 +38,12 @@ class BacktestTrade:
     stop_loss: float
     take_profit: float
     confidence: float
-    model_type: str  # TTFT
+    model_type: str  # SCALPER
+    
+    # Scalper-specific data
+    stoch_k: float = 50.0
+    ema_aligned: bool = False
+    ema_crossover: bool = False
     
     # Outcome (filled after simulation)
     exit_price: Optional[float] = None
@@ -71,9 +75,11 @@ class BacktestResult:
     max_drawdown_pct: float = 0.0
     profit_factor: float = 0.0
     
-    # By model
-    ttft_trades: int = 0
-    ttft_wins: int = 0
+    # By direction
+    long_trades: int = 0
+    long_wins: int = 0
+    short_trades: int = 0
+    short_wins: int = 0
     
     # Trade list
     trades: List[BacktestTrade] = field(default_factory=list)
@@ -85,39 +91,52 @@ class BacktestResult:
         return (self.wins / self.total_trades) * 100
     
     @property
-    def ttft_win_rate(self) -> float:
-        if self.ttft_trades == 0:
+    def long_win_rate(self) -> float:
+        if self.long_trades == 0:
             return 0.0
-        return (self.ttft_wins / self.ttft_trades) * 100
+        return (self.long_wins / self.long_trades) * 100
+    
+    @property
+    def short_win_rate(self) -> float:
+        if self.short_trades == 0:
+            return 0.0
+        return (self.short_wins / self.short_trades) * 100
 
 
 class Backtester:
     """
-    Backtest the Auction Market Strategy on historical data.
+    Backtest the EMA 5-8-13 Scalping Strategy on historical data.
     """
     
     def __init__(
         self,
         symbol: str = "BTCUSDT",
-        timeframe: str = "5m",
-        confidence_threshold: float = 0.7,
-        lookback_periods: int = 50  # Scalping config (ATR 14 + buffer)
+        timeframe: str = "1m",
+        confidence_threshold: float = 0.5,
+        lookback_periods: int = 50
     ):
         self.symbol = symbol
         self.timeframe = timeframe
         self.confidence_threshold = confidence_threshold
         self.lookback_periods = lookback_periods
         
-        # Strategy generator - EMA SCALPING configuration
-        from signals.ema_scalp import EMAScalpGenerator
-        self.strategy = EMAScalpGenerator(
-            ema_fast=9,
-            ema_slow=21,
-            rsi_period=14,
-            rr_ratio=1.0,  # 1:1 R:R for faster exits
-            lookback_bars=5,
-            min_rsi_distance=3.0
+        # EMA 5-8-13 Scalping Strategy Generator
+        self.strategy = ScalperGenerator(
+            ema_fast=5,
+            ema_mid=8,
+            ema_slow=13,
+            use_stoch_filter=True,
+            stoch_rsi_period=14,
+            stoch_period=14,
+            stoch_k_smooth=3,
+            stoch_oversold=20.0,
+            stoch_overbought=80.0,
+            atr_period=14,
+            atr_mult_sl=1.0,
+            rr_ratio=1.5,
+            confidence_threshold=confidence_threshold
         )
+        
         self.volume_profile = VolumeProfileCalculator()
         self.order_flow = OrderFlowAnalyzer()
         
@@ -137,7 +156,7 @@ class Backtester:
         end_time = datetime.now()
         start_time = end_time - timedelta(days=days)
         
-        logger.info(f"Starting backtest for {self.symbol} {self.timeframe}")
+        logger.info(f"Starting Scalper backtest for {self.symbol} {self.timeframe}")
         logger.info(f"Period: {start_time.strftime('%Y-%m-%d')} to {end_time.strftime('%Y-%m-%d')}")
         
         # Fetch historical klines
@@ -220,7 +239,7 @@ class Backtester:
         Simulate trading through historical data.
         Walk through each candle and check for signals/exits.
         """
-        logger.info("Simulating trading...")
+        logger.info("Simulating Apex trading...")
         
         for i in range(self.lookback_periods, len(klines)):
             # Get lookback window
@@ -239,17 +258,17 @@ class Backtester:
             
             # If no active trade, look for signals
             if not self.active_trade:
-                # Generate mock trades list (simplified - no real trades needed for signal gen)
+                # Generate mock trades list (simplified - for volume analysis)
                 mock_trades = self._generate_mock_trades(window)
                 
-                # Try EMA Scalping Strategy
+                # Try Scalper Strategy
                 signal = self.strategy.generate_signal(
                     window, mock_trades, self.symbol
                 )
                 
                 if signal:
                     result.total_signals += 1
-                    self._open_trade(signal, current_kline, "EMA_SCALP", result)
+                    self._open_trade(signal, current_kline, result)
             
             # Progress
             if i % 1000 == 0:
@@ -298,8 +317,8 @@ class Backtester:
         
         return trades
     
-    def _open_trade(self, signal, kline: Kline, model_type: str, result: BacktestResult):
-        """Open a new trade from a signal."""
+    def _open_trade(self, signal: ScalperSignal, kline: Kline, result: BacktestResult):
+        """Open a new trade from a Scalper signal."""
         trade = BacktestTrade(
             timestamp=kline.close_time,
             symbol=self.symbol,
@@ -308,12 +327,20 @@ class Backtester:
             stop_loss=signal.stop_loss,
             take_profit=signal.take_profit,
             confidence=signal.confidence,
-            model_type=model_type
+            model_type="SCALPER",
+            stoch_k=signal.stoch_k,
+            ema_aligned=signal.ema_aligned,
+            ema_crossover=signal.ema_crossover
         )
         
         self.active_trade = trade
         result.total_trades += 1
-        result.ttft_trades += 1
+        
+        # Track by direction
+        if signal.direction == "LONG":
+            result.long_trades += 1
+        else:
+            result.short_trades += 1
     
     def _check_exit(
         self, 
@@ -373,7 +400,10 @@ class Backtester:
         
         if trade.is_win:
             result.wins += 1
-            result.ttft_wins += 1
+            if trade.direction == "LONG":
+                result.long_wins += 1
+            else:
+                result.short_wins += 1
         else:
             result.losses += 1
         
@@ -422,9 +452,9 @@ class Backtester:
 def print_results(result: BacktestResult):
     """Print backtest results in a nice format."""
     print("\n")
-    print("═" * 65)
-    print(f"              BACKTEST RESULTS - {result.symbol} {result.timeframe}")
-    print("═" * 65)
+    print("═" * 70)
+    print(f"       🎯 APEX STRATEGY BACKTEST RESULTS - {result.symbol} {result.timeframe}")
+    print("═" * 70)
     print(f"Period:           {result.start_date.strftime('%Y-%m-%d')} to {result.end_date.strftime('%Y-%m-%d')}")
     print(f"Total Candles:    {result.total_candles:,}")
     print(f"Total Signals:    {result.total_signals}")
@@ -432,11 +462,14 @@ def print_results(result: BacktestResult):
     print()
     
     if result.total_trades == 0:
-        print("No trades executed during this period.")
+        print("⚠️ No trades executed during this period.")
         print("Try lowering the confidence threshold or using a longer period.")
-        print("═" * 65)
+        print("═" * 70)
         return
     
+    print("─" * 70)
+    print("                        PERFORMANCE METRICS")
+    print("─" * 70)
     print(f"Win Rate:         {result.win_rate:.1f}% ({result.wins} wins / {result.losses} losses)")
     print(f"Profit Factor:    {result.profit_factor:.2f}")
     print(f"Average Win:      +{result.avg_win_pct:.2f}%")
@@ -444,21 +477,38 @@ def print_results(result: BacktestResult):
     print(f"Total Return:     {'+' if result.total_pnl_pct >= 0 else ''}{result.total_pnl_pct:.2f}%")
     print(f"Max Drawdown:     -{result.max_drawdown_pct:.2f}%")
     print()
-    print("By Model:")
-    if result.ttft_trades > 0:
-        print(f"  TTFT Model:        {result.ttft_win_rate:.1f}% win rate ({result.ttft_trades} trades)")
+    print("─" * 70)
+    print("                        BY DIRECTION")
+    print("─" * 70)
+    print(f"LONG Trades:      {result.long_win_rate:.1f}% win rate ({result.long_trades} trades)")
+    print(f"SHORT Trades:     {result.short_win_rate:.1f}% win rate ({result.short_trades} trades)")
+    print()
+    
+    # Analyze trade exit reasons
+    tp_hits = sum(1 for t in result.trades if t.exit_reason == "TP_HIT")
+    sl_hits = sum(1 for t in result.trades if t.exit_reason == "SL_HIT")
+    timeouts = sum(1 for t in result.trades if t.exit_reason == "TIMEOUT")
+    
+    print("─" * 70)
+    print("                        EXIT ANALYSIS")
+    print("─" * 70)
+    print(f"Take Profits:     {tp_hits} ({(tp_hits/result.total_trades)*100:.1f}%)")
+    print(f"Stop Losses:      {sl_hits} ({(sl_hits/result.total_trades)*100:.1f}%)")
+    print(f"Timeouts:         {timeouts} ({(timeouts/result.total_trades)*100:.1f}%)")
     print()
     
     # Show recent trades
-    print("Recent Trades:")
-    print("-" * 65)
+    print("─" * 70)
+    print("                        RECENT TRADES")
+    print("─" * 70)
     for trade in result.trades[-10:]:
         dt = datetime.fromtimestamp(trade.timestamp / 1000)
         win_loss = "✓ WIN " if trade.is_win else "✗ LOSS"
+        stoch_str = f"StK:{trade.stoch_k:.0f}" if trade.stoch_k else ""
         print(f"  {dt.strftime('%m-%d %H:%M')} | {trade.direction:5} | "
-              f"{trade.model_type:15} | {win_loss} | {trade.pnl_pct:+.2f}%")
+              f"{win_loss} | {trade.pnl_pct:+.2f}% | {stoch_str}")
     
-    print("═" * 65)
+    print("═" * 70)
 
 
 def save_results(result: BacktestResult, filename: str):
@@ -481,8 +531,10 @@ def save_results(result: BacktestResult, filename: str):
         "avg_win_pct": result.avg_win_pct,
         "avg_loss_pct": result.avg_loss_pct,
         "max_drawdown_pct": result.max_drawdown_pct,
-        "ttft_trades": result.ttft_trades,
-        "ttft_win_rate": result.ttft_win_rate,
+        "long_trades": result.long_trades,
+        "long_win_rate": result.long_win_rate,
+        "short_trades": result.short_trades,
+        "short_win_rate": result.short_win_rate,
         "trades": [
             {
                 "timestamp": t.timestamp,
@@ -495,7 +547,10 @@ def save_results(result: BacktestResult, filename: str):
                 "is_win": t.is_win,
                 "exit_reason": t.exit_reason,
                 "model_type": t.model_type,
-                "confidence": t.confidence
+                "confidence": t.confidence,
+                "stoch_k": t.stoch_k,
+                "ema_aligned": t.ema_aligned,
+                "ema_crossover": t.ema_crossover
             }
             for t in result.trades
         ]
@@ -534,7 +589,8 @@ async def save_to_database(result: BacktestResult):
                 stop_loss=trade.stop_loss,
                 take_profit=trade.take_profit,
                 confidence=trade.confidence,
-                model_type=trade.model_type
+                model_type=trade.model_type,
+                market_state=f"StochK={trade.stoch_k:.1f}_EMA={trade.ema_aligned}"
             )
             
             # Update with outcome
@@ -552,15 +608,15 @@ async def save_to_database(result: BacktestResult):
     await storage.close()
     
     print(f"\n✅ Saved {saved_count} trades to database for ML training")
-    print(f"   The OnlineLearningTrainer will use these to improve predictions")
+    print(f"   The SignalAccuracyModel will use these to improve predictions")
 
 
 async def main():
-    parser = argparse.ArgumentParser(description="Backtest Auction Market Strategy")
+    parser = argparse.ArgumentParser(description="Backtest EMA 5-8-13 Scalping Strategy")
     parser.add_argument("--symbol", type=str, default="BTCUSDT", help="Trading pair (default: BTCUSDT)")
     parser.add_argument("--days", type=int, default=30, help="Days of history (default: 30)")
     parser.add_argument("--timeframe", type=str, default="5m", help="Timeframe (default: 5m)")
-    parser.add_argument("--confidence", type=float, default=0.7, help="Confidence threshold (default: 0.7)")
+    parser.add_argument("--confidence", type=float, default=0.5, help="Confidence threshold (default: 0.5)")
     parser.add_argument("--save", action="store_true", help="Save results to JSON file")
     parser.add_argument("--train", action="store_true", help="Save results to database for ML training")
     
@@ -572,11 +628,12 @@ async def main():
                format="{time:HH:mm:ss} | {level:7} | {message}",
                level="INFO")
     
-    print(f"\n🎯 TTFT Strategy Backtester")
+    print(f"\n⚡ EMA 5-8-13 HIGH-FREQUENCY SCALPER")
+    print(f"="*50)
     print(f"Symbol: {args.symbol} | Timeframe: {args.timeframe} | Days: {args.days}")
     print(f"Confidence Threshold: {args.confidence}")
     if args.train:
-        print(f"Mode: TRAINING - Results will be saved to database")
+        print(f"Mode: TRAINING - Results will be saved to database for ML")
     print()
     
     # Run backtest
@@ -606,4 +663,3 @@ async def main():
 
 if __name__ == "__main__":
     asyncio.run(main())
-

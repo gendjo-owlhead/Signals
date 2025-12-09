@@ -3,13 +3,12 @@ Order Executor - Converts trading signals into executed orders.
 Main entry point for trade execution.
 """
 import asyncio
-from typing import Optional, Union
+from typing import Optional, Union, Any
 from dataclasses import dataclass
 from loguru import logger
 
 from config import settings
-from signals.trend_model import TrendSignal
-from signals.mean_reversion import ReversionSignal
+from signals.scalper_strategy import ScalperSignal
 from trading.binance_trader import binance_trader, OrderResult
 from trading.position_manager import position_manager, ManagedPosition
 from trading.risk_manager import risk_manager
@@ -175,7 +174,7 @@ class OrderExecutor:
     
     def validate_signal(
         self,
-        signal: Union[TrendSignal, ReversionSignal]
+        signal: ScalperSignal
     ) -> tuple[bool, str]:
         """Validate a signal before execution."""
         
@@ -200,7 +199,7 @@ class OrderExecutor:
     
     async def execute_signal(
         self,
-        signal: Union[TrendSignal, ReversionSignal]
+        signal: ScalperSignal
     ) -> ExecutionResult:
         """
         Execute a trading signal.
@@ -212,7 +211,7 @@ class OrderExecutor:
     
     async def _do_execute(
         self,
-        signal: Union[TrendSignal, ReversionSignal]
+        signal: ScalperSignal
     ) -> ExecutionResult:
         """Internal execution logic."""
         
@@ -276,7 +275,7 @@ class OrderExecutor:
             )
         
         # 5. Track position
-        signal_type = "TREND" if isinstance(signal, TrendSignal) else "MEAN_REVERSION"
+        signal_type = "SCALPER"
         
         position = position_manager.add_position(
             symbol=symbol,

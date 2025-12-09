@@ -2,7 +2,7 @@
 Signal Manager - Aggregates and manages all signal generation.
 """
 import asyncio
-from typing import List, Dict, Optional, Callable
+from typing import List, Dict, Optional, Callable, Union
 from dataclasses import dataclass, field
 from datetime import datetime
 from collections import deque
@@ -13,7 +13,7 @@ from data.binance_ws import binance_ws, Kline, Trade
 from data.storage import storage
 from analysis.volume_profile import volume_profile_calculator
 from analysis.market_state import market_state_analyzer
-from signals.ema_scalp import ema_scalp_generator, ScalpSignal
+from signals.scalper_strategy import scalper_generator, ScalperSignal
 from ml.trainer import online_trainer
 
 
@@ -53,6 +53,11 @@ class AnalysisSnapshot:
     aggression_direction: str
     aggression_strength: float
     
+    # Scalper info
+    scalper_signal: str = "NONE"
+    scalper_stoch: float = 50.0
+    scalper_trend: str = "NEUTRAL"
+    
     # Active signals
     active_signals: List[dict] = field(default_factory=list)
     
@@ -73,6 +78,9 @@ class AnalysisSnapshot:
             'cvd_trend': self.cvd_trend,
             'aggression_direction': self.aggression_direction,
             'aggression_strength': self.aggression_strength,
+            'scalper_signal': self.scalper_signal,
+            'scalper_stoch': self.scalper_stoch,
+            'scalper_trend': self.scalper_trend,
             'active_signals': self.active_signals
         }
 
@@ -83,7 +91,7 @@ class SignalManager:
     
     Responsibilities:
     - Run continuous analysis on all configured pairs
-    - Generate signals from both Trend and Mean Reversion models
+    - Generate signals using EMA 5-8-13 Scalping strategy
     - Store signals in database
     - Broadcast updates to connected clients
     - Track signal outcomes for ML training
@@ -93,7 +101,7 @@ class SignalManager:
         self.running = False
         
         # Signal storage
-        self.active_signals: Dict[str, List[Union[TrendSignal, ReversionSignal]]] = {}
+        self.active_signals: Dict[str, List[ApexSignal]] = {}
         self.signal_history: Dict[str, deque] = {}
         
         # Analysis snapshots
@@ -125,7 +133,7 @@ class SignalManager:
     async def start(self):
         """Start continuous signal generation."""
         self.running = True
-        logger.info("Signal Manager started")
+        logger.info("Signal Manager started - using Apex Trend & Liquidity Master strategy")
         
         # Start analysis loop for each symbol
         tasks = [self._analysis_loop(symbol) for symbol in settings.trading_pairs]
@@ -141,15 +149,15 @@ class SignalManager:
         Continuous analysis loop for a symbol.
         Runs analysis on each new candle close.
         """
-        logger.info(f"Starting analysis loop for {symbol}")
+        logger.info(f"Starting Apex analysis loop for {symbol}")
         
         # Track last analyzed candle
         last_analyzed_time = 0
         
         while self.running:
             try:
-                # Get latest klines
-                klines = binance_ws.get_klines(symbol, settings.primary_timeframe, 100)
+                # Get latest klines - need more for Apex (trend_length + buffer)
+                klines = binance_ws.get_klines(symbol, settings.primary_timeframe, 150)
                 
                 if not klines:
                     await asyncio.sleep(1)
@@ -175,27 +183,23 @@ class SignalManager:
                 await asyncio.sleep(5)
     
     async def _analyze_and_generate(self, symbol: str, klines: List[Kline]):
-        """Run full analysis and attempt signal generation."""
+        """Run full analysis and attempt signal generation using Scalper strategy."""
         
-        logger.debug(f"{symbol}: Running analysis...")
-        
-        # EMA Scalp only profitable on BTC, skip ETH
-        if symbol != "BTCUSDT":
-            return
+        logger.debug(f"{symbol}: Running Scalper analysis...")
         
         # Get recent trades for order flow (kept for interface compatibility)
         trades = binance_ws.get_recent_trades(symbol, 500)
         
-        # Use EMA Scalping Strategy
-        scalp_signal = ema_scalp_generator.generate_signal(klines, trades, symbol)
+        # Use EMA 5-8-13 Scalping Strategy
+        scalper_signal = scalper_generator.generate_signal(klines, trades, symbol)
         
-        if scalp_signal:
-            await self._handle_new_signal(symbol, scalp_signal)
+        if scalper_signal:
+            await self._handle_new_signal(symbol, scalper_signal)
     
     async def _handle_new_signal(
         self,
         symbol: str,
-        signal: ScalpSignal
+        signal: ScalperSignal
     ):
         """Process and store a new signal."""
         
@@ -210,7 +214,7 @@ class SignalManager:
         self.signal_history[symbol].append(signal)
         
         # Store in database
-        signal_type = "EMA_SCALP"
+        signal_type = "SCALPER"
         
         try:
             signal_id = await storage.save_signal(
@@ -223,29 +227,31 @@ class SignalManager:
                 take_profit=signal.take_profit,
                 confidence=signal.confidence,
                 model_type=signal_type,
-                market_state=f"EMA9={signal.ema_9:.2f}_EMA21={signal.ema_21:.2f}",
-                lvn_price=signal.ema_21,  # Use EMA 21 as support/resistance
+                market_state=f"StochK={signal.stoch_k:.1f}_EMA={signal.ema_aligned}",
+                lvn_price=signal.ema13,
                 poc_price=signal.take_profit,
-                cvd_value=signal.rsi,  # Store RSI value
+                cvd_value=signal.stoch_k,
                 aggression_score=signal.confidence
             )
-            logger.info(f"{symbol}: Signal saved to database (ID: {signal_id})")
+            logger.info(f"{symbol}: Scalper Signal saved to database (ID: {signal_id})")
             
             # Record for ML pattern learning
             try:
                 online_trainer.record_lvn_touch(
                     symbol=symbol,
-                    lvn_price=signal.ema_21,
+                    lvn_price=signal.ema13,
                     touch_price=signal.entry_price,
                     direction=signal.direction,
                     context={
                         'volume_ratio': 1.0,
-                        'cvd_value': signal.rsi,
+                        'cvd_value': signal.stoch_k,
                         'order_flow_imbalance': signal.confidence,
                         'distance_to_poc': abs(signal.entry_price - signal.take_profit) / signal.entry_price,
-                        'market_state': 'SCALP',
-                        'momentum': signal.rsi - 50,
-                        'volatility': signal.risk_percent / 100
+                        'market_state': 'SCALPER',
+                        'momentum': signal.stoch_k,
+                        'volatility': signal.risk_percent / 100,
+                        'stoch_k': signal.stoch_k,
+                        'ema_aligned': signal.ema_aligned
                     },
                     reaction='pending'
                 )
@@ -327,6 +333,9 @@ class SignalManager:
             cvd_trend=cvd_pressure.get('trend', 'neutral'),
             aggression_direction=aggression_direction,
             aggression_strength=aggression_strength,
+            scalper_signal="NONE",  # Updated when signal generated
+            scalper_stoch=50.0,
+            scalper_trend=market_analysis.state.value,
             active_signals=[s.to_dict() for s in self.active_signals[symbol]]
         )
         

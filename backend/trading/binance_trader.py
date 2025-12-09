@@ -2,10 +2,11 @@
 Binance Futures API wrapper for trade execution.
 Handles order placement, position queries, and TP/SL management.
 """
+import asyncio
 import hmac
 import hashlib
 import time
-from typing import Dict, List, Optional, Literal
+from typing import Dict, List, Optional, Literal, Callable, Awaitable
 from dataclasses import dataclass
 import aiohttp
 from loguru import logger
@@ -358,6 +359,44 @@ class BinanceTrader:
             status=data.get('status', 'UNKNOWN')
         )
     
+    async def _place_order_with_retry(
+        self,
+        order_fn: Callable[[], Awaitable[OrderResult]],
+        order_type: str,
+        max_retries: int = 3
+    ) -> OrderResult:
+        """
+        Retry order placement with exponential backoff.
+        
+        Args:
+            order_fn: Async function that places the order
+            order_type: Description for logging (e.g., "TP", "SL")
+            max_retries: Maximum retry attempts
+            
+        Returns:
+            OrderResult from the last attempt
+        """
+        result = None
+        for attempt in range(max_retries):
+            result = await order_fn()
+            
+            if result.success:
+                if attempt > 0:
+                    logger.info(f"{order_type} order succeeded on attempt {attempt + 1}")
+                return result
+            
+            # Don't retry on final attempt
+            if attempt < max_retries - 1:
+                wait_time = (2 ** attempt) * 0.5  # 0.5s, 1s, 2s
+                logger.warning(
+                    f"{order_type} order failed (attempt {attempt + 1}/{max_retries}): "
+                    f"{result.error}. Retrying in {wait_time}s..."
+                )
+                await asyncio.sleep(wait_time)
+        
+        logger.error(f"{order_type} order failed after {max_retries} attempts: {result.error}")
+        return result
+    
     async def place_bracket_order(
         self,
         symbol: str,
@@ -368,6 +407,7 @@ class BinanceTrader:
     ) -> Dict[str, OrderResult]:
         """
         Place a market order with TP and SL.
+        TP and SL orders are retried up to 3 times if they fail.
         Returns dict with 'entry', 'tp', 'sl' results.
         """
         # Determine sides
@@ -376,7 +416,7 @@ class BinanceTrader:
         
         results = {}
         
-        # 1. Place entry order
+        # 1. Place entry order (no retry - if entry fails, abort)
         entry_result = await self.place_market_order(symbol, entry_side, quantity)
         results['entry'] = entry_result
         
@@ -389,23 +429,31 @@ class BinanceTrader:
         # Use actual filled quantity for TP/SL
         filled_qty = entry_result.quantity
         
-        # 2. Place take profit
-        tp_result = await self.place_take_profit_order(
-            symbol, exit_side, filled_qty, take_profit_price
+        # 2. Place take profit with retry
+        tp_result = await self._place_order_with_retry(
+            order_fn=lambda: self.place_take_profit_order(
+                symbol, exit_side, filled_qty, take_profit_price
+            ),
+            order_type="TP",
+            max_retries=3
         )
         results['tp'] = tp_result
         
         if not tp_result.success:
-            logger.warning(f"TP order failed: {tp_result.error}")
+            logger.error(f"CRITICAL: TP order failed for {symbol} after all retries - position may be unprotected!")
         
-        # 3. Place stop loss
-        sl_result = await self.place_stop_loss_order(
-            symbol, exit_side, filled_qty, stop_loss_price
+        # 3. Place stop loss with retry
+        sl_result = await self._place_order_with_retry(
+            order_fn=lambda: self.place_stop_loss_order(
+                symbol, exit_side, filled_qty, stop_loss_price
+            ),
+            order_type="SL",
+            max_retries=3
         )
         results['sl'] = sl_result
         
         if not sl_result.success:
-            logger.warning(f"SL order failed: {sl_result.error}")
+            logger.error(f"CRITICAL: SL order failed for {symbol} after all retries - position may be unprotected!")
         
         return results
     
