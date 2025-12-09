@@ -273,6 +273,37 @@ class OrderExecutor:
                 message=error_msg,
                 entry_result=entry_result
             )
+
+        # EMERGENCY SAFETY CHECK
+        # If TP or SL failed, we MUST close the position immediately to prevent unprotected exposure.
+        tp_ok = tp_result and tp_result.success
+        sl_ok = sl_result and sl_result.success
+        
+        if not tp_ok or not sl_ok:
+            fail_reason = []
+            if not tp_ok: fail_reason.append("TP Failed")
+            if not sl_ok: fail_reason.append("SL Failed")
+            reason_str = ", ".join(fail_reason)
+            
+            logger.critical(f"⛔ SAFETY SHUTDOWN: {reason_str} for {symbol}. Closing position immediately!")
+            
+            # Attempt to close the position we just opened
+            close_result = await binance_trader.close_position(
+                symbol=symbol,
+                direction=direction,
+                quantity=entry_result.quantity
+            )
+            
+            close_msg = "Position closed" if close_result.success else f"FAILED TO CLOSE: {close_result.error}"
+            logger.info(f"Emergency close result: {close_msg}")
+            
+            return ExecutionResult(
+                success=False,
+                message=f"Safety Abort: {reason_str}. {close_msg}",
+                entry_result=entry_result,
+                tp_result=tp_result,
+                sl_result=sl_result
+            )
         
         # 5. Track position
         signal_type = "SCALPER"
