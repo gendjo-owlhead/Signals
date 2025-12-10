@@ -288,6 +288,66 @@ class LVNPatternRecognizer:
         exp_x = np.exp(np.array(x) - np.max(x))
         return (exp_x / exp_x.sum()).tolist()
     
+    def get_pattern_confidence(
+        self,
+        symbol: str,
+        direction: str,
+        entry_price: float
+    ) -> Optional[float]:
+        """
+        Get pattern confidence score for trade approver.
+        
+        Returns a score between 0 and 1 indicating how favorable
+        the current pattern is for the given trade direction.
+        
+        Args:
+            symbol: Trading pair
+            direction: LONG or SHORT
+            entry_price: Entry price for the trade
+            
+        Returns:
+            Confidence score [0, 1] or None if insufficient data
+        """
+        if len(self.patterns) < 5:
+            return None  # Not enough data
+        
+        # Build features from recent patterns for this symbol
+        symbol_patterns = [p for p in self.patterns if p.symbol == symbol]
+        if len(symbol_patterns) < 3:
+            return 0.5  # Neutral
+        
+        # Use last pattern's features as baseline
+        last = symbol_patterns[-1] if symbol_patterns else None
+        
+        features = {
+            'direction': 0 if direction == 'LONG' else 1,
+            'volume_ratio': last.volume_ratio if last else 1.0,
+            'cvd_value': last.cvd_value if last else 0.0,
+            'order_flow_imbalance': last.order_flow_imbalance if last else 0.0,
+            'distance_to_poc': last.distance_to_poc if last else 0.0,
+            'is_balanced': 1 if (last and last.market_state == 'balanced') else 0,
+            'momentum': last.momentum_before if last else 0.0,
+            'volatility': last.volatility if last else 0.0
+        }
+        
+        reaction, confidence = self.predict_reaction(features)
+        
+        # For LONG, BOUNCE is good. For SHORT, BREAK might be neutral
+        if direction == 'LONG':
+            if reaction == ReactionType.BOUNCE:
+                return min(1.0, 0.5 + confidence * 0.5)  # Boost for bounce
+            elif reaction == ReactionType.BREAK:
+                return max(0.0, 0.5 - confidence * 0.3)  # Reduce for break
+            else:
+                return 0.5  # Neutral for absorption
+        else:  # SHORT
+            if reaction == ReactionType.BREAK:
+                return min(1.0, 0.5 + confidence * 0.4)  # Modest boost for break
+            elif reaction == ReactionType.BOUNCE:
+                return max(0.0, 0.5 - confidence * 0.4)  # Reduce for bounce
+            else:
+                return 0.5
+    
     def get_metrics(self) -> Dict:
         """Get pattern recognition metrics."""
         if not self.patterns:

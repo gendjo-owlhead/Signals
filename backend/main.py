@@ -298,6 +298,34 @@ async def get_ml_metrics():
     return online_trainer.get_ml_metrics()
 
 
+@app.get("/api/ml/approver-status")
+async def get_approver_status():
+    """Get trade approver status including model weights and performance."""
+    from ml.trade_approver import trade_approver
+    return trade_approver.get_status()
+
+
+@app.get("/api/ml/recent-decisions")
+async def get_recent_decisions(limit: int = 20):
+    """Get recent approval/rejection decisions with reasoning."""
+    from ml.trade_approver import trade_approver
+    return {
+        "decisions": trade_approver.get_recent_decisions(limit),
+        "count": len(trade_approver.recent_decisions)
+    }
+
+
+@app.get("/api/ml/feedback-stats")
+async def get_feedback_stats():
+    """Get feedback loop statistics and model performance."""
+    from ml.feedback_loop import feedback_loop
+    return {
+        "stats": feedback_loop.get_stats(),
+        "performance": feedback_loop.get_performance_summary(),
+        "recent_outcomes": feedback_loop.get_recent_outcomes(10)
+    }
+
+
 @app.delete("/api/signals/{symbol}")
 async def clear_signals(symbol: str):
     """Clear active signals for a symbol."""
@@ -404,6 +432,92 @@ async def get_account_info():
             "testnet": settings.binance_testnet,
             "trading_enabled": settings.trading_enabled
         }
+
+
+# ============== Backtest API Routes ==============
+
+@app.get("/api/backtest/results")
+async def get_backtest_results():
+    """Get latest backtest results from freqtrade directory."""
+    import os
+    import zipfile
+    from pathlib import Path
+    
+    backtest_dir = Path(__file__).parent.parent / "freqtrade" / "user_data" / "backtest_results"
+    
+    if not backtest_dir.exists():
+        return {"error": "Backtest results directory not found", "summary": None}
+    
+    # Find the most recent backtest result
+    zip_files = sorted(backtest_dir.glob("backtest-result-*.zip"), reverse=True)
+    
+    if not zip_files:
+        return {"error": "No backtest results found", "summary": None}
+    
+    latest_zip = zip_files[0]
+    
+    try:
+        with zipfile.ZipFile(latest_zip, 'r') as z:
+            # Find the JSON result file inside
+            json_files = [f for f in z.namelist() if f.endswith('.json') and 'meta' not in f]
+            
+            if not json_files:
+                return {"error": "No result data in backtest file", "summary": None}
+            
+            with z.open(json_files[0]) as f:
+                result_data = json.load(f)
+        
+        # Extract strategy data
+        strategy_name = list(result_data.get('strategy', {}).keys())[0] if result_data.get('strategy') else 'unknown'
+        strategy_data = result_data.get('strategy', {}).get(strategy_name, {})
+        
+        # Build summary
+        total_trades = strategy_data.get('total_trades', 0)
+        wins = strategy_data.get('wins', 0)
+        losses = strategy_data.get('losses', 0)
+        win_rate = (wins / total_trades * 100) if total_trades > 0 else 0
+        
+        profit_total = strategy_data.get('profit_total', 0)
+        profit_factor = strategy_data.get('profit_factor', 0)
+        max_drawdown = strategy_data.get('max_drawdown_abs', 0)
+        
+        summary = {
+            "strategy": strategy_name,
+            "total_trades": total_trades,
+            "wins": wins,
+            "losses": losses,
+            "win_rate": win_rate,
+            "net_profit": profit_total * 100,  # Convert to percentage
+            "profit_factor": profit_factor,
+            "max_drawdown": max_drawdown
+        }
+        
+        # Generate suggestions based on metrics
+        suggestions = []
+        
+        if win_rate < 50:
+            suggestions.append("Consider tightening entry conditions - win rate below 50%")
+        if profit_factor and profit_factor < 1.5:
+            suggestions.append("Increase R:R ratio or improve exit timing - profit factor below 1.5")
+        if total_trades < 10:
+            suggestions.append("Extend backtest period for more reliable statistics")
+        if win_rate >= 60 and profit_factor >= 2:
+            suggestions.append("✅ Strong performance! Consider live testing with small position size")
+        if abs(max_drawdown) > 20:
+            suggestions.append("⚠️ High drawdown detected - review risk management parameters")
+        
+        return {
+            "summary": summary,
+            "latest_backtest": {
+                "file": latest_zip.name,
+                "timestamp": latest_zip.stem.replace("backtest-result-", "")
+            },
+            "suggestions": suggestions
+        }
+        
+    except Exception as e:
+        logger.error(f"Failed to parse backtest results: {e}")
+        return {"error": str(e), "summary": None}
 
 
 # ============== Test/Debug Routes ==============

@@ -14,17 +14,12 @@ from data.storage import storage
 from ml.signal_accuracy import signal_accuracy_model, SignalOutcome
 from ml.lvn_patterns import lvn_pattern_recognizer, LVNPattern
 from ml.state_classifier import state_classifier, StateObservation
+from ml.freqai.engine import freqai_engine
 
 
 class OnlineLearningTrainer:
     """
-    Coordinates online learning across all ML models.
-    
-    Responsibilities:
-    - Monitor signal outcomes and feed to signal accuracy model
-    - Record LVN touch events and train pattern recognizer
-    - Collect market state observations for classifier
-    - Periodically trigger model updates
+    Coordinates online learning across all ML models, including FreqAI.
     """
     
     def __init__(self):
@@ -41,16 +36,20 @@ class OnlineLearningTrainer:
         }
     
     async def start(self):
-        """Start the online learning trainer."""
+        """Start the online learning trainer and FreqAI."""
         self.running = True
         logger.info("Online Learning Trainer started")
+        
+        # Start FreqAI
+        await freqai_engine.start()
         
         # Start background tasks
         asyncio.create_task(self._training_loop())
     
     async def stop(self):
-        """Stop the trainer."""
+        """Stop the trainer and FreqAI."""
         self.running = False
+        await freqai_engine.stop()
         logger.info("Online Learning Trainer stopped")
     
     async def _training_loop(self):
@@ -183,7 +182,11 @@ class OnlineLearningTrainer:
             'training': self.metrics,
             'signal_accuracy': signal_accuracy_model.get_metrics(),
             'lvn_patterns': lvn_pattern_recognizer.get_metrics(),
-            'state_classifier': state_classifier.get_metrics()
+            'state_classifier': state_classifier.get_metrics(),
+            'freqai': {
+                'enabled': settings.freqai_enabled
+                # Access to detailed freqai metrics would go here if exposed
+            }
         }
     
     def get_learning_status(self) -> Dict:
@@ -209,6 +212,10 @@ class OnlineLearningTrainer:
                 'observations': state_metrics.get('observations', 0),
                 'is_trained': state_metrics.get('is_trained', False),
                 'status': 'trained' if state_metrics.get('is_trained') else 'learning'
+            },
+            'freqai_status': {
+                'enabled': settings.freqai_enabled,
+                'model': settings.freqai_model_type
             },
             'overall_status': self._get_overall_status()
         }
@@ -260,7 +267,42 @@ class OnlineLearningTrainer:
         
         logger.info(f"Updated signal {target_signal['id']} outcome: {outcome}")
         
-        # 4. Trigger immediate training check
+        # 4. Notify feedback loop for continuous learning
+        try:
+            from ml.feedback_loop import feedback_loop
+            from ml.trade_approver import trade_approver
+            
+            # Get model scores from recent decisions (if available)
+            model_scores = {}
+            recent = trade_approver.get_recent_decisions(5)
+            for decision in reversed(recent):
+                if decision.get('symbol') == symbol:
+                    model_scores = decision.get('result', {}).get('model_scores', {})
+                    break
+            
+            # Record outcome in feedback loop
+            feedback_loop.record_outcome(
+                signal_id=target_signal['id'],
+                symbol=symbol,
+                direction=target_signal.get('direction', 'LONG'),
+                entry_price=entry_price,
+                exit_price=exit_price,
+                pnl=pnl,
+                reason=reason,
+                model_scores=model_scores
+            )
+            
+            # Check if weight rebalancing is needed
+            if feedback_loop.should_rebalance():
+                adjustments = feedback_loop.suggest_weight_adjustments()
+                if adjustments:
+                    trade_approver.update_weights(adjustments)
+                    logger.info(f"Applied weight adjustments based on recent performance: {adjustments}")
+            
+        except Exception as e:
+            logger.warning(f"Feedback loop update failed: {e}")
+        
+        # 5. Trigger immediate training check
         await self._check_and_train()
 
     def _get_overall_status(self) -> str:

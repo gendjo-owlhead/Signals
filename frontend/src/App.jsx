@@ -15,6 +15,7 @@ import OrderFlowPanel from './components/OrderFlowPanel'
 import MarketStatePanel from './components/MarketState'
 import MLMetrics from './components/MLMetrics'
 import TradingPanel from './components/TradingPanel'
+import BacktestResults from './components/BacktestResults'
 import { MiniChartWidget } from './components/TradingViewWidgets'
 
 function App() {
@@ -148,6 +149,9 @@ function App() {
           
           {/* ML Status */}
           <MLMetrics status={mlStatus} stats={stats} />
+          
+          {/* Backtest Results */}
+          <BacktestResults />
         </div>
       </main>
     </div>

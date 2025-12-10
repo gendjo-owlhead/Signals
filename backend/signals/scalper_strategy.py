@@ -114,26 +114,27 @@ class ScalperSignal:
     
     def to_dict(self) -> dict:
         """Convert to dictionary for JSON serialization."""
+        # Convert numpy types to native Python types for JSON serialization
         return {
-            'timestamp': self.timestamp,
-            'symbol': self.symbol,
-            'timeframe': self.timeframe,
-            'direction': self.direction,
-            'entry_price': self.entry_price,
-            'stop_loss': self.stop_loss,
-            'take_profit': self.take_profit,
-            'atr_value': self.atr_value,
-            'confidence': self.confidence,
-            'ema5': self.ema5,
-            'ema8': self.ema8,
-            'ema13': self.ema13,
-            'ema_aligned': self.ema_aligned,
-            'ema_crossover': self.ema_crossover,
-            'stoch_k': self.stoch_k,
-            'stoch_d': self.stoch_d,
-            'risk_reward': self.risk_reward,
-            'risk_percent': self.risk_percent,
-            'filters_passed': self.filters_passed
+            'timestamp': int(self.timestamp),
+            'symbol': str(self.symbol),
+            'timeframe': str(self.timeframe),
+            'direction': str(self.direction),
+            'entry_price': float(self.entry_price),
+            'stop_loss': float(self.stop_loss),
+            'take_profit': float(self.take_profit),
+            'atr_value': float(self.atr_value),
+            'confidence': float(self.confidence),
+            'ema5': float(self.ema5),
+            'ema8': float(self.ema8),
+            'ema13': float(self.ema13),
+            'ema_aligned': bool(self.ema_aligned),
+            'ema_crossover': bool(self.ema_crossover),
+            'stoch_k': float(self.stoch_k),
+            'stoch_d': float(self.stoch_d),
+            'risk_reward': float(self.risk_reward),
+            'risk_percent': float(self.risk_percent),
+            'filters_passed': {str(k): bool(v) for k, v in self.filters_passed.items()}
         }
 
 

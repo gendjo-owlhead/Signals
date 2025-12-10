@@ -19,6 +19,7 @@ def mock_settings(tmp_path):
     test_data_dir.mkdir()
     
     # Override path
+    original_path = settings.ml_model_path
     settings.ml_model_path = str(test_data_dir)
     
     # Patch global instances that have already cached the path

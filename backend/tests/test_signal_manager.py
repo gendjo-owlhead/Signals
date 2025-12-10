@@ -102,9 +102,21 @@ class TestSignalManager:
         with patch('signals.signal_manager.settings') as mock_settings:
             mock_settings.trading_enabled = True
             mock_settings.trading_pairs = ["BTCUSDT"]
+            mock_settings.primary_timeframe = "1m"
             
-            # Patch the INSTANCE method of OrderExecutor
-            with patch('trading.order_executor.OrderExecutor.execute_signal', new_callable=AsyncMock) as mock_exec:
+            # Mock the trade approver to return an approved result
+            mock_approval = MagicMock()
+            mock_approval.approved = True
+            mock_approval.score = 0.8
+            mock_approval.adjusted_confidence = 0.85
+            mock_approval.reason = "Test approval"
+            mock_approval.model_scores = {'signal_accuracy': 0.9}
+            
+            with patch('ml.trade_approver.trade_approver') as mock_approver, \
+                 patch('trading.order_executor.OrderExecutor.execute_signal', new_callable=AsyncMock) as mock_exec:
+                
+                mock_approver.approve_trade = AsyncMock(return_value=mock_approval)
+                
                 result = MagicMock()
                 result.success = True
                 result.position.id = "pos_123"

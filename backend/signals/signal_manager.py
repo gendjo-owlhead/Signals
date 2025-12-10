@@ -203,11 +203,65 @@ class SignalManager:
     ):
         """Process and store a new signal."""
         
-        # Check if we already have an active signal for this symbol
         if self.active_signals[symbol]:
             # For now, don't generate conflicting signals
             logger.debug(f"{symbol}: Signal skipped - active signal exists")
             return
+
+        # -------------------------------------------------------------------------
+        # ML GATEKEEPER: Trade approver must approve before proceeding
+        # -------------------------------------------------------------------------
+        from ml.trade_approver import trade_approver, TradeContext
+        from analysis.market_state import market_state_analyzer
+        
+        # Build context for ML approval
+        try:
+            # Get recent klines for market context
+            klines = binance_ws.get_klines(symbol, settings.primary_timeframe, 50)
+            market_analysis = market_state_analyzer.analyze(klines) if klines else None
+            
+            context = TradeContext(
+                symbol=symbol,
+                direction=signal.direction,
+                entry_price=signal.entry_price,
+                stop_loss=signal.stop_loss,
+                take_profit=signal.take_profit,
+                original_confidence=signal.confidence,
+                market_state=market_analysis.state.value if market_analysis else "unknown",
+                market_state_confidence=market_analysis.confidence if market_analysis else 0.0,
+                cvd_trend="up" if signal.stoch_k > 50 else "down",
+                aggression_strength=signal.confidence,
+                stoch_k=signal.stoch_k,
+                ema_aligned=signal.ema_aligned,
+                risk_reward=signal.risk_reward
+            )
+        except Exception as e:
+            logger.warning(f"{symbol}: Failed to build ML context: {e}")
+            # Use minimal context
+            context = TradeContext(
+                symbol=symbol,
+                direction=signal.direction,
+                entry_price=signal.entry_price,
+                stop_loss=signal.stop_loss,
+                take_profit=signal.take_profit,
+                original_confidence=signal.confidence
+            )
+        
+        # Get ML approval decision
+        approval = await trade_approver.approve_trade(signal=signal, context=context)
+        
+        if not approval.approved:
+            logger.info(f"{symbol}: ❌ ML REJECTED - {approval.reason}")
+            logger.debug(f"{symbol}: Model scores: {approval.model_scores}")
+            # Could optionally store rejected signals for analysis
+            return
+        
+        logger.info(f"{symbol}: ✅ ML APPROVED - score={approval.score:.2f} | {approval.reason}")
+        logger.debug(f"{symbol}: Model scores: {approval.model_scores}")
+        
+        # Update signal confidence with ML-adjusted value
+        signal.confidence = approval.adjusted_confidence
+        # -------------------------------------------------------------------------
         
         # Store in memory
         self.active_signals[symbol].append(signal)
