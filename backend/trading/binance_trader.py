@@ -278,24 +278,25 @@ class BinanceTrader:
         quantity: float,
         stop_price: float
     ) -> OrderResult:
-        """Place a stop-loss order."""
+        """Place a stop-loss order using Algo Order API (STOP_MARKET)."""
         info = await self.get_exchange_info(symbol)
         qty = self._round_quantity(quantity, info['quantity_precision'])
-        price = self._round_price(stop_price, info['price_precision'])
+        stop = self._round_price(stop_price, info['price_precision'])
         
+        # Use Algo Order API with STOP_MARKET for reliable execution
         params = {
             'symbol': symbol,
             'side': side,
+            'algoType': 'CONDITIONAL',
             'type': 'STOP_MARKET',
             'quantity': qty,
-            'stopPrice': price,
-            'closePosition': 'false',
-            'workingType': 'MARK_PRICE'
+            'triggerPrice': stop,
+            'workingType': 'MARK_PRICE'  # Use mark price to avoid manipulation
         }
         
-        logger.info(f"Placing SL order: {side} {qty} {symbol} @ {price}")
+        logger.info(f"Placing SL order via Algo API: {side} {qty} {symbol} stop={stop}")
         
-        data = await self._request('POST', '/fapi/v1/order', params)
+        data = await self._request('POST', '/fapi/v1/algoOrder', params)
         
         if 'error' in data:
             return OrderResult(
@@ -305,14 +306,15 @@ class BinanceTrader:
                 error=data['error']
             )
         
+        # Algo orders return 'algoId' instead of 'orderId'
         return OrderResult(
             success=True,
-            order_id=str(data.get('orderId', '')),
+            order_id=str(data.get('algoId', data.get('orderId', ''))),
             symbol=symbol,
             side=side,
             quantity=qty,
-            price=price,
-            status=data.get('status', 'UNKNOWN')
+            price=stop,
+            status=data.get('status', 'NEW')
         )
     
     async def place_take_profit_order(
@@ -322,24 +324,25 @@ class BinanceTrader:
         quantity: float,
         take_profit_price: float
     ) -> OrderResult:
-        """Place a take-profit order."""
+        """Place a take-profit order using Algo Order API (TAKE_PROFIT_MARKET)."""
         info = await self.get_exchange_info(symbol)
         qty = self._round_quantity(quantity, info['quantity_precision'])
-        price = self._round_price(take_profit_price, info['price_precision'])
+        stop = self._round_price(take_profit_price, info['price_precision'])
         
+        # Use Algo Order API with TAKE_PROFIT_MARKET for reliable execution
         params = {
             'symbol': symbol,
             'side': side,
+            'algoType': 'CONDITIONAL',
             'type': 'TAKE_PROFIT_MARKET',
             'quantity': qty,
-            'stopPrice': price,
-            'closePosition': 'false',
-            'workingType': 'MARK_PRICE'
+            'triggerPrice': stop,
+            'workingType': 'MARK_PRICE'  # Use mark price to avoid manipulation
         }
         
-        logger.info(f"Placing TP order: {side} {qty} {symbol} @ {price}")
+        logger.info(f"Placing TP order via Algo API: {side} {qty} {symbol} stop={stop}")
         
-        data = await self._request('POST', '/fapi/v1/order', params)
+        data = await self._request('POST', '/fapi/v1/algoOrder', params)
         
         if 'error' in data:
             return OrderResult(
@@ -349,14 +352,15 @@ class BinanceTrader:
                 error=data['error']
             )
         
+        # Algo orders return 'algoId' instead of 'orderId'
         return OrderResult(
             success=True,
-            order_id=str(data.get('orderId', '')),
+            order_id=str(data.get('algoId', data.get('orderId', ''))),
             symbol=symbol,
             side=side,
             quantity=qty,
-            price=price,
-            status=data.get('status', 'UNKNOWN')
+            price=stop,
+            status=data.get('status', 'NEW')
         )
     
     async def _place_order_with_retry(
@@ -407,7 +411,11 @@ class BinanceTrader:
     ) -> Dict[str, OrderResult]:
         """
         Place a market order with TP and SL.
-        TP and SL orders are retried up to 3 times if they fail.
+        
+        On testnet: TP/SL orders may fail due to API limitations.
+        In that case, we still track the position but return "testnet_skip" for TP/SL.
+        The position_monitor will track price and close at TP/SL levels.
+        
         Returns dict with 'entry', 'tp', 'sl' results.
         """
         # Determine sides
@@ -439,7 +447,20 @@ class BinanceTrader:
         )
         results['tp'] = tp_result
         
-        if not tp_result.success:
+        # On testnet, if TP fails with -4120, create a "skip" result
+        if not tp_result.success and settings.binance_testnet:
+            if 'Algo Order' in str(tp_result.error) or '-4120' in str(tp_result.error):
+                logger.warning(f"TESTNET: TP order not supported, will use position monitoring instead")
+                results['tp'] = OrderResult(
+                    success=True,
+                    order_id="TESTNET_MONITOR",
+                    symbol=symbol,
+                    side=exit_side,
+                    quantity=filled_qty,
+                    price=take_profit_price,
+                    status="TESTNET_MONITOR"
+                )
+        elif not tp_result.success:
             logger.error(f"CRITICAL: TP order failed for {symbol} after all retries - position may be unprotected!")
         
         # 3. Place stop loss with retry
@@ -452,7 +473,20 @@ class BinanceTrader:
         )
         results['sl'] = sl_result
         
-        if not sl_result.success:
+        # On testnet, if SL fails with -4120, create a "skip" result
+        if not sl_result.success and settings.binance_testnet:
+            if 'Algo Order' in str(sl_result.error) or '-4120' in str(sl_result.error):
+                logger.warning(f"TESTNET: SL order not supported, will use position monitoring instead")
+                results['sl'] = OrderResult(
+                    success=True,
+                    order_id="TESTNET_MONITOR",
+                    symbol=symbol,
+                    side=exit_side,
+                    quantity=filled_qty,
+                    price=stop_loss_price,
+                    status="TESTNET_MONITOR"
+                )
+        elif not sl_result.success:
             logger.error(f"CRITICAL: SL order failed for {symbol} after all retries - position may be unprotected!")
         
         return results

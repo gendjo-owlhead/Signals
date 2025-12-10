@@ -528,43 +528,32 @@ async def create_test_signal(symbol: str = "BTCUSDT", direction: str = "LONG"):
     [TESTING ONLY] Create a manual test signal to verify order execution.
     DELETE THIS IN PRODUCTION!
     """
-    from signals.trend_model import TrendSignal
-    from analysis.order_flow import AggressionSignal
+    from signals.scalper_strategy import ScalperSignal
     from datetime import datetime
     
-    # Get current price
-    klines = binance_ws.get_klines(symbol, settings.primary_timeframe, 5)
+    # Get current price and calculate ATR
+    klines = binance_ws.get_klines(symbol, settings.primary_timeframe, 50)
     if not klines:
         return {"error": f"No price data for {symbol}"}
     
     current_price = klines[-1].close
     
+    # Simple ATR calculation
+    atr_sum = sum(max(k.high - k.low, abs(k.high - k.close), abs(k.low - k.close)) for k in klines[-14:])
+    atr_value = atr_sum / 14
+    
     # Calculate SL/TP based on direction
     if direction.upper() == "LONG":
-        stop_loss = current_price * 0.995  # 0.5% SL
-        take_profit = current_price * 1.01  # 1% TP
-        impulse_start = current_price * 0.99
-        impulse_end = current_price
+        stop_loss = current_price - (atr_value * 1.0)  # 1x ATR SL
+        take_profit = current_price + (atr_value * 1.5)  # 1.5x ATR TP
+        stoch_k = 25.0  # Oversold for LONG
     else:
-        stop_loss = current_price * 1.005  # 0.5% SL
-        take_profit = current_price * 0.99  # 1% TP
-        impulse_start = current_price * 1.01
-        impulse_end = current_price
+        stop_loss = current_price + (atr_value * 1.0)  # 1x ATR SL  
+        take_profit = current_price - (atr_value * 1.5)  # 1.5x ATR TP
+        stoch_k = 75.0  # Overbought for SHORT
     
-    # Create mock aggression signal
-    mock_aggression = AggressionSignal(
-        timestamp=int(datetime.now().timestamp() * 1000),
-        symbol=symbol,
-        direction="BUY" if direction.upper() == "LONG" else "SELL",
-        strength=0.8,
-        cvd_confirming=True,
-        imbalance_count=3,
-        large_prints_count=2,
-        description="Test signal aggression"
-    )
-    
-    # Create test signal with correct fields
-    test_signal = TrendSignal(
+    # Create test signal using ScalperSignal
+    test_signal = ScalperSignal(
         timestamp=int(datetime.now().timestamp() * 1000),
         symbol=symbol,
         timeframe=settings.primary_timeframe,
@@ -572,34 +561,60 @@ async def create_test_signal(symbol: str = "BTCUSDT", direction: str = "LONG"):
         entry_price=current_price,
         stop_loss=stop_loss,
         take_profit=take_profit,
-        lvn_price=current_price,
-        poc_target=take_profit,
-        impulse_start=impulse_start,
-        impulse_end=impulse_end,
+        atr_value=atr_value,
         confidence=0.75,
-        aggression=mock_aggression,
-        market_state="trending_up" if direction.upper() == "LONG" else "trending_down",
-        risk_reward=2.0,
-        risk_percent=0.5
+        ema5=current_price,
+        ema8=current_price,
+        ema13=current_price,
+        ema_aligned=True,
+        ema_crossover=True,
+        stoch_k=stoch_k,
+        stoch_d=stoch_k - 5,
+        risk_reward=1.5,
+        risk_percent=abs(current_price - stop_loss) / current_price * 100,
+        filters_passed={
+            'ema_crossover': True,
+            'ema_aligned': True,
+            'stoch_confirming': True
+        }
     )
     
-    # Process through signal manager
-    await signal_manager._handle_new_signal(symbol, test_signal)
+    # Execute directly via order executor (bypass ML gatekeeper for testing)
+    from trading import order_executor
     
     logger.warning(f"TEST SIGNAL CREATED: {symbol} {direction} @ {current_price}")
     
-    return {
-        "status": "created",
-        "signal": {
-            "symbol": symbol,
-            "direction": direction.upper(),
-            "entry": current_price,
-            "stop_loss": stop_loss,
-            "take_profit": take_profit,
-            "confidence": 0.75
-        },
-        "message": "Test signal created. Check trading panel for execution."
-    }
+    if settings.trading_enabled:
+        result = await order_executor.execute_signal(test_signal)
+        return {
+            "status": "executed" if result.success else "failed",
+            "signal": {
+                "symbol": symbol,
+                "direction": direction.upper(),
+                "entry": current_price,
+                "stop_loss": stop_loss,
+                "take_profit": take_profit,
+                "confidence": 0.75
+            },
+            "execution": {
+                "success": result.success,
+                "message": result.message,
+                "position_id": result.position.id if result.position else None
+            }
+        }
+    else:
+        return {
+            "status": "created",
+            "signal": {
+                "symbol": symbol,
+                "direction": direction.upper(),
+                "entry": current_price,
+                "stop_loss": stop_loss,
+                "take_profit": take_profit,
+                "confidence": 0.75
+            },
+            "message": "Trading disabled. Signal created but NOT executed."
+        }
 
 
 @app.get("/api/test/why-no-signals/{symbol}")
