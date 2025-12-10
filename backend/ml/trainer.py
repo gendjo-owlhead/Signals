@@ -64,7 +64,7 @@ class OnlineLearningTrainer:
                 await asyncio.sleep(self.training_interval_seconds)
                 
             except Exception as e:
-                logger.error(f"Training loop error: {e}")
+                logger.exception(f"Training loop error: {e}")
                 await asyncio.sleep(60)
     
     async def _check_and_train(self):

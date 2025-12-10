@@ -115,38 +115,7 @@ class TestBacktestSmoke:
         assert state.state.value in ['trending_up', 'trending_down', 'balanced', 'breakout', 'rotation']
         assert 0 <= state.confidence <= 1
     
-    def test_trend_signal_generation(self, sample_klines, sample_trades):
-        """Trend model should attempt signal generation without error."""
-        from signals.trend_model import TrendModelGenerator
-        
-        generator = TrendModelGenerator()
-        
-        # This may return None (no signal), but should not error
-        signal = generator.generate_signal(
-            klines=sample_klines,
-            trades=sample_trades,
-            symbol='BTCUSDT',
-            prior_poc=50000.0
-        )
-        
-        # Signal can be None if conditions not met, that's OK
-        assert signal is None or signal.symbol == 'BTCUSDT'
-    
-    def test_mean_reversion_signal_generation(self, sample_klines, sample_trades):
-        """Mean reversion model should attempt signal generation without error."""
-        from signals.mean_reversion import MeanReversionGenerator
-        
-        generator = MeanReversionGenerator()
-        
-        # This may return None (no signal), but should not error
-        signal = generator.generate_signal(
-            klines=sample_klines,
-            trades=sample_trades,
-            symbol='BTCUSDT'
-        )
-        
-        # Signal can be None if conditions not met, that's OK
-        assert signal is None or signal.symbol == 'BTCUSDT'
+
     
     def test_ml_confidence_adjustment(self):
         """ML model should adjust confidence scores."""

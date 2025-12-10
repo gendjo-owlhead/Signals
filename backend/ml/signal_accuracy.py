@@ -100,6 +100,10 @@ class SignalAccuracyModel:
         self.outcomes.append(outcome)
         
         # Update metrics
+        if self.metrics.get('total_signals') is None: self.metrics['total_signals'] = 0
+        if self.metrics.get('wins') is None: self.metrics['wins'] = 0
+        if self.metrics.get('losses') is None: self.metrics['losses'] = 0
+
         self.metrics['total_signals'] += 1
         if outcome.outcome == "WIN":
             self.metrics['wins'] += 1
@@ -107,7 +111,9 @@ class SignalAccuracyModel:
             self.metrics['losses'] += 1
         
         if self.metrics['total_signals'] > 0:
-            self.metrics['win_rate'] = self.metrics['wins'] / self.metrics['total_signals']
+            wins = self.metrics.get('wins', 0) or 0
+            total = self.metrics.get('total_signals', 1) or 1
+            self.metrics['win_rate'] = wins / total
         
         # Trigger learning if enough samples
         if len(self.outcomes) >= settings.min_samples_for_training:
@@ -181,8 +187,8 @@ class SignalAccuracyModel:
         
         # Calculate feature importance based on difference between wins and losses
         for feature_name in self.feature_weights.keys():
-            win_values = [o.features.get(feature_name, 0.5) for o in wins if feature_name in o.features]
-            loss_values = [o.features.get(feature_name, 0.5) for o in losses if feature_name in o.features]
+            win_values = [o.features.get(feature_name) if o.features.get(feature_name) is not None else 0.5 for o in wins if feature_name in o.features]
+            loss_values = [o.features.get(feature_name) if o.features.get(feature_name) is not None else 0.5 for o in losses if feature_name in o.features]
             
             if win_values and loss_values:
                 win_avg = np.mean(win_values)
