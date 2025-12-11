@@ -61,6 +61,7 @@ class Settings(BaseSettings):
     # ML Settings
     ml_model_path: str = Field(default="data/models", env="ML_MODEL_PATH")
     online_learning_enabled: bool = Field(default=True, env="ONLINE_LEARNING")
+    ml_gatekeeper_enabled: bool = Field(default=False, env="ML_GATEKEEPER_ENABLED")
     min_samples_for_training: int = Field(default=50, env="MIN_TRAIN_SAMPLES")
     
     # FreqAI Settings

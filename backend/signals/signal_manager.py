@@ -361,10 +361,12 @@ class SignalManager:
         approval = await trade_approver.approve_trade(signal=signal, context=context)
         
         if not approval.approved:
-            logger.info(f"{symbol}: ❌ ML REJECTED - {approval.reason}")
-            logger.debug(f"{symbol}: Model scores: {approval.model_scores}")
-            # Could optionally store rejected signals for analysis
-            return
+            if settings.ml_gatekeeper_enabled:
+                logger.info(f"{symbol}: ❌ ML REJECTED - {approval.reason}")
+                logger.debug(f"{symbol}: Model scores: {approval.model_scores}")
+                return
+            else:
+                logger.warning(f"{symbol}: ⚠️ ML REJECTED ({approval.reason}) but Gatekeeper DISABLED - PROCEEDING")
         
         logger.info(f"{symbol}: ✅ ML APPROVED - score={approval.score:.2f} | {approval.reason}")
         logger.debug(f"{symbol}: Model scores: {approval.model_scores}")
