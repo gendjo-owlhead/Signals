@@ -75,7 +75,10 @@ class HistoricalDataFetcher:
         if end_time:
             params["endTime"] = end_time
         
-        url = f"{self.base_url}/api/v3/klines"
+        if "future" in self.base_url:
+            url = f"{self.base_url}/fapi/v1/klines"
+        else:
+            url = f"{self.base_url}/api/v3/klines"
         
         try:
             async with session.get(url, params=params) as response:
@@ -130,7 +133,10 @@ class HistoricalDataFetcher:
         """
         session = await self._get_session()
         
-        url = f"{self.base_url}/api/v3/aggTrades"
+        if "future" in self.base_url:
+            url = f"{self.base_url}/fapi/v1/aggTrades"
+        else:
+            url = f"{self.base_url}/api/v3/aggTrades"
         params = {
             "symbol": symbol,
             "limit": min(limit, 1000)
@@ -187,7 +193,10 @@ class HistoricalDataFetcher:
         current_start = start_time
         
         while current_start < end_time:
-            url = f"{self.base_url}/api/v3/aggTrades"
+            if "future" in self.base_url:
+                url = f"{self.base_url}/fapi/v1/aggTrades"
+            else:
+                url = f"{self.base_url}/api/v3/aggTrades"
             params = {
                 "symbol": symbol,
                 "startTime": current_start,

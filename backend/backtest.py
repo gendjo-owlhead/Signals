@@ -539,18 +539,18 @@ def save_results(result: BacktestResult, filename: str):
             {
                 "timestamp": t.timestamp,
                 "direction": t.direction,
-                "entry_price": t.entry_price,
-                "exit_price": t.exit_price,
-                "stop_loss": t.stop_loss,
-                "take_profit": t.take_profit,
-                "pnl_pct": t.pnl_pct,
-                "is_win": t.is_win,
+                "entry_price": float(t.entry_price),
+                "exit_price": float(t.exit_price) if t.exit_price else None,
+                "stop_loss": float(t.stop_loss),
+                "take_profit": float(t.take_profit),
+                "pnl_pct": float(t.pnl_pct) if t.pnl_pct else None,
+                "is_win": bool(t.is_win) if t.is_win is not None else None,
                 "exit_reason": t.exit_reason,
                 "model_type": t.model_type,
-                "confidence": t.confidence,
-                "stoch_k": t.stoch_k,
-                "ema_aligned": t.ema_aligned,
-                "ema_crossover": t.ema_crossover
+                "confidence": float(t.confidence),
+                "stoch_k": float(t.stoch_k),
+                "ema_aligned": bool(t.ema_aligned),
+                "ema_crossover": bool(t.ema_crossover)
             }
             for t in result.trades
         ]

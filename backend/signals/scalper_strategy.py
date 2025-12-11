@@ -247,6 +247,7 @@ class ScalperGenerator:
         bearish_cross = prev_ema5 >= prev_ema8 and current_ema5 < current_ema8
         
         if not bullish_cross and not bearish_cross:
+            # logger.debug(f"{symbol}: No EMA crossover (5/8)")
             return None
         
         direction = "LONG" if bullish_cross else "SHORT"
@@ -269,6 +270,7 @@ class ScalperGenerator:
             )
         
         if not ema_aligned:
+            logger.debug(f"{symbol}: EMA crossover detected but alignment failed. Direction: {direction}, EMA5:{current_ema5:.2f}, EMA8:{current_ema8:.2f}, EMA13:{current_ema13:.2f}, Close:{current_close:.2f}")
             return None
         
         # ════════════════════════════════════════════════════════════════
@@ -291,6 +293,7 @@ class ScalperGenerator:
                 stoch_confirming = current_stoch_k > self.stoch_oversold
             
             if not stoch_confirming:
+                logger.debug(f"{symbol}: EMA/Alignment OK but StochRSI failed. K:{current_stoch_k:.2f}, Limit:{self.stoch_overbought if direction == 'LONG' else self.stoch_oversold}")
                 return None
         
         # ════════════════════════════════════════════════════════════════
@@ -329,6 +332,7 @@ class ScalperGenerator:
         )
         
         if confidence < self.confidence_threshold:
+            logger.debug(f"{symbol}: Confidence too low ({confidence:.2f} < {self.confidence_threshold})")
             return None
         
         # ════════════════════════════════════════════════════════════════

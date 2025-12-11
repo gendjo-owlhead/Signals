@@ -161,3 +161,88 @@ class TestBacktestIntegration:
         assert result.symbol == 'BTCUSDT'
         assert result.total_signals == 0
         assert result.wins == 0
+
+
+class TestBacktestOrchestrator:
+    """Tests for BacktestOrchestrator."""
+    
+    def test_orchestrator_import(self):
+        """BacktestOrchestrator should import."""
+        from backtest_orchestrator import BacktestOrchestrator, BACKTEST_MATRIX
+        assert BacktestOrchestrator is not None
+        assert len(BACKTEST_MATRIX) > 0
+    
+    def test_config_matrix_completeness(self):
+        """Verify all 8 symbol/timeframe combinations are configured."""
+        from backtest_orchestrator import BACKTEST_MATRIX
+        
+        # Should have 2 symbols x 4 timeframes = 8 configs
+        assert len(BACKTEST_MATRIX) == 8
+        
+        # Verify BTC across all timeframes
+        btc_timeframes = [c.timeframe for c in BACKTEST_MATRIX if c.symbol == "BTCUSDT"]
+        assert "1m" in btc_timeframes
+        assert "5m" in btc_timeframes
+        assert "15m" in btc_timeframes
+        assert "1h" in btc_timeframes
+        
+        # Verify ETH across all timeframes
+        eth_timeframes = [c.timeframe for c in BACKTEST_MATRIX if c.symbol == "ETHUSDT"]
+        assert len(eth_timeframes) == 4
+    
+    def test_config_days_by_timeframe(self):
+        """Verify correct number of days configured per timeframe."""
+        from backtest_orchestrator import BACKTEST_MATRIX
+        
+        for config in BACKTEST_MATRIX:
+            if config.timeframe == "1m":
+                assert config.days == 365, f"1m should have 365 days, got {config.days}"
+            elif config.timeframe in ["5m", "15m"]:
+                assert config.days == 1095, f"{config.timeframe} should have 1095 days"
+            elif config.timeframe == "1h":
+                assert config.days == 1825, f"1h should have 1825 days"
+    
+    def test_orchestrator_init(self):
+        """Orchestrator should initialize properly."""
+        from backtest_orchestrator import BacktestOrchestrator
+        
+        orch = BacktestOrchestrator(parallel_limit=1)
+        
+        assert orch.parallel_limit == 1
+        assert orch.running is False
+        assert len(orch.current_runs) == 0
+    
+    def test_get_status(self):
+        """get_status should return expected structure."""
+        from backtest_orchestrator import BacktestOrchestrator
+        
+        orch = BacktestOrchestrator()
+        status = orch.get_status()
+        
+        assert "running" in status
+        assert "pending_backtests" in status
+        assert "current_backtests" in status
+        assert "aggregate_stats" in status
+        assert "matrix_size" in status
+        assert status["matrix_size"] == 8
+    
+    def test_get_performance_summary(self):
+        """get_performance_summary should return expected structure."""
+        from backtest_orchestrator import BacktestOrchestrator
+        
+        orch = BacktestOrchestrator()
+        summary = orch.get_performance_summary()
+        
+        assert "by_symbol" in summary
+        assert "by_timeframe" in summary
+        assert "overall" in summary
+    
+    def test_backtest_config_id(self):
+        """BacktestConfig should generate correct ID."""
+        from backtest_orchestrator import BacktestConfig
+        
+        config = BacktestConfig("BTCUSDT", "5m", 365, 24)
+        
+        assert config.id == "BTCUSDT_5m"
+        assert config.symbol == "BTCUSDT"
+        assert config.timeframe == "5m"

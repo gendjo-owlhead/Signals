@@ -1,5 +1,5 @@
 """
-Signal Manager - Aggregates and manages all signal generation.
+Signal Manager - Aggregates and manages all signal generation across multiple timeframes.
 """
 import asyncio
 from typing import List, Dict, Optional, Callable, Union
@@ -14,6 +14,7 @@ from data.storage import storage
 from analysis.volume_profile import volume_profile_calculator
 from analysis.market_state import market_state_analyzer
 from signals.scalper_strategy import scalper_generator, ScalperSignal
+from signals.multi_timeframe_analyzer import mtf_analyzer
 from ml.trainer import online_trainer
 
 
@@ -87,11 +88,12 @@ class AnalysisSnapshot:
 
 class SignalManager:
     """
-    Central signal management and coordination.
+    Central signal management and coordination for multi-timeframe analysis.
     
     Responsibilities:
-    - Run continuous analysis on all configured pairs
+    - Run continuous analysis on all configured pairs across all timeframes
     - Generate signals using EMA 5-8-13 Scalping strategy
+    - Validate signals against multi-timeframe confluence
     - Store signals in database
     - Broadcast updates to connected clients
     - Track signal outcomes for ML training
@@ -100,12 +102,16 @@ class SignalManager:
     def __init__(self):
         self.running = False
         
+        # All timeframes we monitor
+        self.all_timeframes = settings.timeframes  # ["1m", "5m", "15m", "1h"]
+        
         # Signal storage
-        self.active_signals: Dict[str, List[ApexSignal]] = {}
+        self.active_signals: Dict[str, List[ScalperSignal]] = {}
         self.signal_history: Dict[str, deque] = {}
         
-        # Analysis snapshots
-        self.analysis_snapshots: Dict[str, AnalysisSnapshot] = {}
+        # Analysis snapshots - now keyed by symbol AND timeframe
+        self.analysis_snapshots: Dict[str, AnalysisSnapshot] = {}  # Legacy: primary TF only
+        self.timeframe_snapshots: Dict[str, Dict[str, AnalysisSnapshot]] = {}  # New: all TFs
         
         # Callbacks for real-time updates
         self.update_callbacks: List[Callable] = []
@@ -114,6 +120,7 @@ class SignalManager:
         for symbol in settings.trading_pairs:
             self.active_signals[symbol] = []
             self.signal_history[symbol] = deque(maxlen=100)
+            self.timeframe_snapshots[symbol] = {}
     
     def on_update(self, callback: Callable[[SignalUpdate], None]):
         """Register callback for signal updates."""
@@ -131,11 +138,11 @@ class SignalManager:
                 logger.error(f"Update callback error: {e}")
     
     async def start(self):
-        """Start continuous signal generation."""
+        """Start continuous signal generation for all timeframes."""
         self.running = True
-        logger.info("Signal Manager started - using Apex Trend & Liquidity Master strategy")
+        logger.info(f"Signal Manager started - analyzing {len(self.all_timeframes)} timeframes: {self.all_timeframes}")
         
-        # Start analysis loop for each symbol
+        # Start analysis loop for each symbol (handles all timeframes internally)
         tasks = [self._analysis_loop(symbol) for symbol in settings.trading_pairs]
         await asyncio.gather(*tasks)
     
@@ -146,41 +153,126 @@ class SignalManager:
     
     async def _analysis_loop(self, symbol: str):
         """
-        Continuous analysis loop for a symbol.
+        Continuous analysis loop for a symbol across all timeframes.
         Runs analysis on each new candle close.
         """
-        logger.info(f"Starting Apex analysis loop for {symbol}")
+        logger.info(f"Starting multi-timeframe analysis loop for {symbol}")
         
-        # Track last analyzed candle
-        last_analyzed_time = 0
+        # Track last analyzed candle per timeframe
+        last_analyzed_times: Dict[str, int] = {tf: 0 for tf in self.all_timeframes}
+        last_generated_time: int = 0
         
         while self.running:
             try:
-                # Get latest klines - need more for Apex (trend_length + buffer)
-                klines = binance_ws.get_klines(symbol, settings.primary_timeframe, 150)
+                # Analyze ALL timeframes
+                for timeframe in self.all_timeframes:
+                    await self._analyze_timeframe(symbol, timeframe, last_analyzed_times)
                 
-                if not klines:
-                    await asyncio.sleep(1)
-                    continue
-                
-                current_kline = klines[-1]
-                
-                # Check for new closed candle
-                if current_kline.is_closed and current_kline.close_time > last_analyzed_time:
-                    last_analyzed_time = current_kline.close_time
+                # Primary timeframe generates actual trades
+                primary_klines = binance_ws.get_klines(symbol, settings.primary_timeframe, 150)
+                if primary_klines:
+                    current_kline = primary_klines[-1]
+                    if current_kline.is_closed and current_kline.close_time > last_generated_time:
+                        last_generated_time = current_kline.close_time
+                        await self._analyze_and_generate(symbol, primary_klines)
                     
-                    # Run analysis
-                    await self._analyze_and_generate(symbol, klines)
+                    # Update primary snapshot for backward compatibility
+                    await self._update_snapshot(symbol, primary_klines)
                 
-                # Update snapshot even without new candle (for live price)
-                await self._update_snapshot(symbol, klines)
-                
-                # Wait before next check
                 await asyncio.sleep(1)
                 
             except Exception as e:
                 logger.error(f"Analysis loop error for {symbol}: {e}")
                 await asyncio.sleep(5)
+    
+    async def _analyze_timeframe(self, symbol: str, timeframe: str, last_analyzed_times: Dict[str, int]):
+        """
+        Analyze a specific timeframe and update MTF analyzer.
+        """
+        try:
+            klines = binance_ws.get_klines(symbol, timeframe, 100)
+            if not klines:
+                return
+            
+            current_kline = klines[-1]
+            
+            # Only update on new closed candle
+            if not current_kline.is_closed or current_kline.close_time <= last_analyzed_times.get(timeframe, 0):
+                return
+            
+            last_analyzed_times[timeframe] = current_kline.close_time
+            
+            # Calculate EMA trend and stochastic for this timeframe
+            closes = [k.close for k in klines]
+            
+            # Simple EMA calculation for trend detection
+            ema_fast = self._calculate_ema(closes, 5)
+            ema_mid = self._calculate_ema(closes, 8)
+            ema_slow = self._calculate_ema(closes, 13)
+            
+            # Determine trend from EMAs
+            if ema_fast > ema_mid > ema_slow:
+                ema_trend = "UP"
+            elif ema_fast < ema_mid < ema_slow:
+                ema_trend = "DOWN"
+            else:
+                ema_trend = "NEUTRAL"
+            
+            # Determine direction and strength
+            price = current_kline.close
+            if ema_trend == "UP" and price > ema_fast:
+                direction = "LONG"
+                strength = min(1.0, (price - ema_slow) / ema_slow * 20)
+            elif ema_trend == "DOWN" and price < ema_fast:
+                direction = "SHORT"
+                strength = min(1.0, (ema_slow - price) / ema_slow * 20)
+            else:
+                direction = "NEUTRAL"
+                strength = 0.3
+            
+            # Calculate a simple stochastic approximation
+            highs = [k.high for k in klines[-14:]]
+            lows = [k.low for k in klines[-14:]]
+            highest = max(highs) if highs else price
+            lowest = min(lows) if lows else price
+            stoch_k = ((price - lowest) / (highest - lowest) * 100) if highest != lowest else 50.0
+            
+            # Confidence based on trend alignment
+            confidence = 0.5
+            if ema_trend != "NEUTRAL":
+                confidence += 0.2
+            if abs(stoch_k - 50) > 30:  # Strong stoch reading
+                confidence += 0.15
+            confidence = min(1.0, confidence)
+            
+            # Update MTF analyzer
+            mtf_analyzer.update_signal(
+                symbol=symbol,
+                timeframe=timeframe,
+                direction=direction,
+                strength=strength,
+                ema_trend=ema_trend,
+                stoch_k=stoch_k,
+                confidence=confidence
+            )
+            
+            logger.debug(f"{symbol} {timeframe}: {direction} (strength={strength:.2f}, stoch={stoch_k:.0f})")
+            
+        except Exception as e:
+            logger.error(f"Error analyzing {symbol} {timeframe}: {e}")
+    
+    def _calculate_ema(self, values: List[float], period: int) -> float:
+        """Calculate EMA for the given values."""
+        if len(values) < period:
+            return values[-1] if values else 0.0
+        
+        multiplier = 2 / (period + 1)
+        ema = sum(values[:period]) / period  # Start with SMA
+        
+        for value in values[period:]:
+            ema = (value - ema) * multiplier + ema
+        
+        return ema
     
     async def _analyze_and_generate(self, symbol: str, klines: List[Kline]):
         """Run full analysis and attempt signal generation using Scalper strategy."""
@@ -207,6 +299,24 @@ class SignalManager:
             # For now, don't generate conflicting signals
             logger.debug(f"{symbol}: Signal skipped - active signal exists")
             return
+
+        # -------------------------------------------------------------------------
+        # MULTI-TIMEFRAME CHECK: Validate signal against MTF confluence
+        # -------------------------------------------------------------------------
+        confluence = mtf_analyzer.get_confluence(symbol)
+        
+        if not mtf_analyzer.is_trade_aligned(symbol, signal.direction):
+            logger.info(
+                f"{symbol}: ❌ MTF REJECTED {signal.direction} - "
+                f"confluence={confluence.confluence_score:.2f} | {confluence.reasoning}"
+            )
+            return
+        
+        logger.info(
+            f"{symbol}: ✅ MTF ALIGNED {signal.direction} - "
+            f"confluence={confluence.confluence_score:.2f} | "
+            f"{confluence.aligned_timeframes}/{confluence.total_timeframes} TFs aligned"
+        )
 
         # -------------------------------------------------------------------------
         # ML GATEKEEPER: Trade approver must approve before proceeding

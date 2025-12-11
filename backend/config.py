@@ -22,7 +22,7 @@ class Settings(BaseSettings):
         env="TRADING_PAIRS"
     )
     timeframes: List[str] = Field(
-        default=["1m", "5m"],
+        default=["1m", "5m", "15m", "1h"],
         env="TIMEFRAMES"
     )
     primary_timeframe: str = Field(default="5m", env="PRIMARY_TIMEFRAME")
@@ -61,8 +61,6 @@ class Settings(BaseSettings):
     # ML Settings
     ml_model_path: str = Field(default="data/models", env="ML_MODEL_PATH")
     online_learning_enabled: bool = Field(default=True, env="ONLINE_LEARNING")
-    ml_model_path: str = Field(default="data/models", env="ML_MODEL_PATH")
-    online_learning_enabled: bool = Field(default=True, env="ONLINE_LEARNING")
     min_samples_for_training: int = Field(default=50, env="MIN_TRAIN_SAMPLES")
     
     # FreqAI Settings
@@ -70,6 +68,10 @@ class Settings(BaseSettings):
     freqai_train_period_days: int = Field(default=14, env="FREQAI_TRAIN_PERIOD_DAYS")
     freqai_retrain_interval_minutes: int = Field(default=60, env="FREQAI_RETRAIN_INTERVAL_MINUTES")
     freqai_model_type: str = Field(default="LightGBMRegressor", env="FREQAI_MODEL_TYPE")
+    
+    # Backtest Orchestrator Settings
+    backtest_orchestrator_enabled: bool = Field(default=True, env="BACKTEST_ORCH_ENABLED")
+    backtest_parallel_limit: int = Field(default=1, env="BACKTEST_PARALLEL_LIMIT")
     
     
     # Trading Execution Settings

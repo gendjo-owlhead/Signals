@@ -16,6 +16,8 @@ import MarketStatePanel from './components/MarketState'
 import MLMetrics from './components/MLMetrics'
 import TradingPanel from './components/TradingPanel'
 import BacktestResults from './components/BacktestResults'
+import BacktestOrchestratorPanel from './components/BacktestOrchestratorPanel'
+import MultiTimeframePanel from './components/MultiTimeframePanel'
 import { MiniChartWidget } from './components/TradingViewWidgets'
 
 function App() {
@@ -142,10 +144,14 @@ function App() {
             onClosePosition={closePosition}
           />
           
-
+          {/* Multi-Timeframe Analysis */}
+          <MultiTimeframePanel symbol={selectedSymbol} />
           
           {/* Active Signal */}
           <SignalPanel signals={signals} symbol={selectedSymbol} />
+          
+          {/* ML Training Pipeline */}
+          <BacktestOrchestratorPanel />
           
           {/* ML Status */}
           <MLMetrics status={mlStatus} stats={stats} />

@@ -367,3 +367,133 @@ export function useTrading() {
     refresh: fetchAccount 
   };
 }
+
+/**
+ * Hook for backtest orchestrator status
+ */
+export function useBacktestOrchestrator() {
+  const [status, setStatus] = useState(null);
+  const [performance, setPerformance] = useState(null);
+  const [loading, setLoading] = useState(true);
+  
+  const fetchStatus = useCallback(async () => {
+    try {
+      const [statusRes, perfRes] = await Promise.all([
+        fetch('/api/backtest/orchestrator/status'),
+        fetch('/api/backtest/orchestrator/performance')
+      ]);
+      
+      if (statusRes.ok) {
+        setStatus(await statusRes.json());
+      }
+      if (perfRes.ok) {
+        setPerformance(await perfRes.json());
+      }
+    } catch (e) {
+      console.error('Failed to fetch orchestrator status:', e);
+    }
+    setLoading(false);
+  }, []);
+  
+  useEffect(() => {
+    fetchStatus();
+    const interval = setInterval(fetchStatus, 30000); // Update every 30s
+    
+    return () => clearInterval(interval);
+  }, [fetchStatus]);
+  
+  const startOrchestrator = useCallback(async () => {
+    try {
+      const response = await fetch('/api/backtest/orchestrator/start', { method: 'POST' });
+      const data = await response.json();
+      fetchStatus();
+      return data;
+    } catch (e) {
+      console.error('Failed to start orchestrator:', e);
+      return { error: e.message };
+    }
+  }, [fetchStatus]);
+  
+  const stopOrchestrator = useCallback(async () => {
+    try {
+      const response = await fetch('/api/backtest/orchestrator/stop', { method: 'POST' });
+      const data = await response.json();
+      fetchStatus();
+      return data;
+    } catch (e) {
+      console.error('Failed to stop orchestrator:', e);
+      return { error: e.message };
+    }
+  }, [fetchStatus]);
+  
+  return { 
+    status, 
+    performance, 
+    loading, 
+    startOrchestrator, 
+    stopOrchestrator,
+    refresh: fetchStatus 
+  };
+}
+
+/**
+ * Hook for multi-timeframe signals
+ */
+export function useMTFSignals(symbol) {
+  const [mtfData, setMtfData] = useState(null);
+  const [loading, setLoading] = useState(true);
+  
+  useEffect(() => {
+    if (!symbol) return;
+    
+    const fetchMTF = async () => {
+      try {
+        const response = await fetch(`/api/signals/multi-timeframe/${symbol}`);
+        if (response.ok) {
+          const data = await response.json();
+          setMtfData(data);
+        }
+      } catch (e) {
+        console.error('Failed to fetch MTF signals:', e);
+      }
+      setLoading(false);
+    };
+    
+    fetchMTF();
+    const interval = setInterval(fetchMTF, 5000);
+    
+    return () => clearInterval(interval);
+  }, [symbol]);
+  
+  return { mtfData, loading };
+}
+
+/**
+ * Hook for MTF analyzer overall status
+ */
+export function useMTFStatus() {
+  const [mtfStatus, setMtfStatus] = useState(null);
+  const [loading, setLoading] = useState(true);
+  
+  useEffect(() => {
+    const fetchStatus = async () => {
+      try {
+        const response = await fetch('/api/signals/mtf-status');
+        if (response.ok) {
+          const data = await response.json();
+          setMtfStatus(data);
+        }
+      } catch (e) {
+        console.error('Failed to fetch MTF status:', e);
+      }
+      setLoading(false);
+    };
+    
+    fetchStatus();
+    const interval = setInterval(fetchStatus, 10000);
+    
+    return () => clearInterval(interval);
+  }, []);
+  
+  return { mtfStatus, loading };
+}

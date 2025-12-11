@@ -16,9 +16,10 @@ import uvicorn
 
 from config import settings
 from data import binance_ws, storage, historical_fetcher
-from signals import signal_manager, SignalUpdate
+from signals import signal_manager, SignalUpdate, mtf_analyzer
 from ml import online_trainer
 from trading import order_executor, position_manager, risk_manager, binance_trader
+from backtest_orchestrator import backtest_orchestrator
 
 
 # WebSocket connection manager
@@ -88,12 +89,21 @@ async def lifespan(app: FastAPI):
     else:
         logger.info("Trading Engine disabled - Signal-only mode")
     
+    # Start backtest orchestrator (if enabled)
+    if settings.backtest_orchestrator_enabled:
+        backtest_orchestrator.start()
+        logger.info("Backtest Orchestrator ENABLED - Continuous ML training active")
+    
     logger.info("All systems initialized!")
     
     yield
     
     # Shutdown
     logger.info("Shutting down...")
+    
+    # Stop orchestrator
+    if settings.backtest_orchestrator_enabled:
+        backtest_orchestrator.stop()
     
     # Stop trading first
     if settings.trading_enabled:
@@ -434,19 +444,159 @@ async def get_account_info():
         }
 
 
+# ============== Backtest Orchestrator API Routes ==============
+
+@app.get("/api/backtest/orchestrator/status")
+async def get_orchestrator_status():
+    """Get status of the backtest orchestrator."""
+    return backtest_orchestrator.get_status()
+
+
+@app.get("/api/backtest/orchestrator/performance")
+async def get_orchestrator_performance():
+    """Get aggregated performance summary from all backtests."""
+    return backtest_orchestrator.get_performance_summary()
+
+
+@app.post("/api/backtest/orchestrator/start")
+async def start_orchestrator():
+    """Start the backtest orchestrator if not already running."""
+    if backtest_orchestrator.running:
+        return {"status": "already_running", "message": "Orchestrator is already running"}
+    
+    backtest_orchestrator.start()
+    return {"status": "started", "message": "Backtest orchestrator started"}
+
+
+@app.post("/api/backtest/orchestrator/stop")
+async def stop_orchestrator():
+    """Stop the backtest orchestrator."""
+    backtest_orchestrator.stop()
+    return {"status": "stopped", "message": "Backtest orchestrator stopped"}
+
+
+@app.post("/api/backtest/run")
+async def run_single_backtest(symbol: str = "BTCUSDT", timeframe: str = "5m", days: int = 30):
+    """Trigger a single backtest run with ML training enabled."""
+    run = await backtest_orchestrator.run_single_backtest(symbol, timeframe, days)
+    if run:
+        return {"status": "completed", "result": run.to_dict()}
+    return {"status": "failed", "message": "Backtest failed to complete"}
+
+
+# ============== Multi-Timeframe API Routes ==============
+
+@app.get("/api/signals/multi-timeframe/{symbol}")
+async def get_mtf_signals(symbol: str):
+    """Get signals across all timeframes for a symbol."""
+    confluence = mtf_analyzer.get_confluence(symbol)
+    return {
+        "symbol": symbol,
+        "confluence": confluence.to_dict(),
+        "signals_by_timeframe": mtf_analyzer.get_all_timeframe_signals(symbol)
+    }
+
+
+@app.get("/api/signals/mtf-status")
+async def get_mtf_status():
+    """Get overall MTF analyzer status for all symbols."""
+    return mtf_analyzer.get_status()
+
+
+@app.get("/api/ml/performance/{symbol}")
+async def get_ml_performance_by_symbol(symbol: str, timeframe: Optional[str] = None):
+    """Get ML performance metrics per symbol and optionally by timeframe."""
+    performance = backtest_orchestrator.get_performance_summary()
+    
+    if symbol not in performance.get("by_symbol", {}):
+        raise HTTPException(status_code=404, detail=f"No performance data for {symbol}")
+    
+    symbol_data = performance["by_symbol"][symbol]
+    
+    if timeframe:
+        if timeframe not in symbol_data.get("timeframes", {}):
+            raise HTTPException(status_code=404, detail=f"No data for {symbol} {timeframe}")
+        return {
+            "symbol": symbol,
+            "timeframe": timeframe,
+            "metrics": symbol_data["timeframes"][timeframe]
+        }
+    
+    return {
+        "symbol": symbol,
+        "avg_win_rate": symbol_data.get("avg_win_rate", 0),
+        "timeframes": symbol_data.get("timeframes", {})
+    }
+
+
 # ============== Backtest API Routes ==============
 
 @app.get("/api/backtest/results")
 async def get_backtest_results():
-    """Get latest backtest results from freqtrade directory."""
+    """Get latest backtest results - prioritizes Python backtest JSON files."""
     import os
     import zipfile
     from pathlib import Path
     
+    # First, check for Python backtest JSON files (EMA Scalper backtest)
+    backend_dir = Path(__file__).parent
+    python_backtest_files = sorted(backend_dir.glob("backtest_*.json"), reverse=True)
+    
+    if python_backtest_files:
+        latest_file = python_backtest_files[0]
+        try:
+            with open(latest_file, 'r') as f:
+                result_data = json.load(f)
+            
+            # Extract metrics from Python backtest format (top-level fields)
+            summary = {
+                "strategy": "EMA 5-8-13 Scalper",
+                "total_trades": result_data.get('total_trades', 0),
+                "wins": result_data.get('wins', 0),
+                "losses": result_data.get('losses', 0),
+                "win_rate": result_data.get('win_rate', 0),
+                "net_profit": result_data.get('total_pnl_pct', 0),
+                "profit_factor": result_data.get('profit_factor', 0),
+                "max_drawdown": result_data.get('max_drawdown_pct', 0)
+            }
+            
+            # Generate suggestions
+            suggestions = []
+            win_rate = summary['win_rate']
+            profit_factor = summary['profit_factor']
+            
+            if win_rate < 50:
+                suggestions.append("Consider tightening entry conditions - win rate below 50%")
+            if profit_factor and profit_factor < 1.5:
+                suggestions.append("Increase R:R ratio or improve exit timing - profit factor below 1.5")
+            if summary['total_trades'] < 100:
+                suggestions.append("Extend backtest period for more reliable statistics")
+            if win_rate >= 50 and profit_factor >= 1.5:
+                suggestions.append("✅ Strong performance! Consider live testing with small position size")
+            if abs(summary['max_drawdown']) > 20:
+                suggestions.append("⚠️ High drawdown detected - review risk management parameters")
+            
+            # Parse timestamp from filename
+            filename = latest_file.stem
+            timestamp_part = filename.split('_')[-2] + '_' + filename.split('_')[-1] if '_' in filename else "Unknown"
+            
+            return {
+                "summary": summary,
+                "latest_backtest": {
+                    "file": latest_file.name,
+                    "timestamp": timestamp_part
+                },
+                "suggestions": suggestions
+            }
+        except Exception as e:
+            logger.error(f"Failed to parse Python backtest: {e}")
+            # Fall through to Freqtrade results
+    
+    # Fallback: Check Freqtrade backtest directory
     backtest_dir = Path(__file__).parent.parent / "freqtrade" / "user_data" / "backtest_results"
     
     if not backtest_dir.exists():
-        return {"error": "Backtest results directory not found", "summary": None}
+        return {"error": "No backtest results found", "summary": None}
     
     # Find the most recent backtest result
     zip_files = sorted(backtest_dir.glob("backtest-result-*.zip"), reverse=True)

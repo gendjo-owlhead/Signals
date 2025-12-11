@@ -972,3 +972,336 @@ h4 { font-size: 1rem; }
   padding: var(--spacing-xl);
   color: var(--text-muted);
 }
+
+/* ============================================
+   Backtest Orchestrator Styles
+   ============================================ */
+
+.orchestrator-target {
+  margin-bottom: var(--spacing-lg);
+  padding: var(--spacing-md);
+  background: var(--bg-secondary);
+  border-radius: var(--radius-md);
+  border: 1px solid var(--border-color);
+}
+
+.target-label {
+  font-size: 0.8rem;
+  color: var(--text-secondary);
+  margin-bottom: var(--spacing-sm);
+  display: flex;
+  justify-content: space-between;
+}
+
+.target-progress {
+  height: 8px;
+  background: var(--bg-tertiary);
+  border-radius: 4px;
+  position: relative;
+  margin-bottom: var(--spacing-xs);
+  overflow: hidden;
+}
+
+.target-bar {
+  height: 100%;
+  border-radius: 4px;
+  transition: width 0.5s ease-out;
+}
+
+.target-marker {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 2px;
+  background: rgba(255, 255, 255, 0.3);
+  z-index: 2;
+}
+
+.target-current {
+  font-size: 0.8rem;
+  text-align: right;
+  color: var(--text-muted);
+}
+
+.orchestrator-section {
+  margin-bottom: var(--spacing-lg);
+}
+
+.orchestrator-section h4 {
+  font-size: 0.85rem;
+  color: var(--text-secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  margin-bottom: var(--spacing-sm);
+}
+
+.backtest-item {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-sm);
+  padding: var(--spacing-sm);
+  background: var(--bg-tertiary);
+  border-radius: var(--radius-sm);
+  margin-bottom: var(--spacing-xs);
+  font-size: 0.85rem;
+}
+
+.backtest-item--running {
+  border: 1px solid var(--accent-primary);
+  background: rgba(99, 102, 241, 0.1);
+}
+
+.backtest-symbol {
+  font-weight: 600;
+  min-width: 80px;
+}
+
+.backtest-timeframe {
+  color: var(--text-muted);
+  min-width: 40px;
+}
+
+.backtest-days {
+  color: var(--text-muted);
+  font-size: 0.75rem;
+}
+
+.backtest-progress {
+  flex: 1;
+  height: 4px;
+  background: var(--bg-secondary);
+  border-radius: 2px;
+  overflow: hidden;
+}
+
+.backtest-progress-bar {
+  height: 100%;
+  background: var(--accent-primary);
+  animation: progress-indeterminate 1.5s infinite linear;
+}
+
+@keyframes progress-indeterminate {
+  0% { transform: translateX(-100%); }
+  100% { transform: translateX(100%); }
+}
+
+.symbol-performance {
+  background: var(--bg-tertiary);
+  border-radius: var(--radius-md);
+  padding: var(--spacing-md);
+  margin-bottom: var(--spacing-sm);
+}
+
+.symbol-header {
+  display: flex;
+  justify-content: space-between;
+  margin-bottom: var(--spacing-sm);
+  font-size: 0.9rem;
+  font-weight: 600;
+}
+
+.timeframe-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: var(--spacing-xs);
+}
+
+.timeframe-cell {
+  background: var(--bg-secondary);
+  padding: var(--spacing-xs);
+  border-radius: var(--radius-sm);
+  text-align: center;
+}
+
+.tf-label {
+  display: block;
+  font-size: 0.7rem;
+  color: var(--text-muted);
+}
+
+.tf-value {
+  font-size: 0.85rem;
+  font-weight: 600;
+}
+
+.pending-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--spacing-xs);
+}
+
+.pending-item {
+  padding: 2px 8px;
+  background: var(--bg-tertiary);
+  border-radius: 12px;
+  font-size: 0.75rem;
+  color: var(--text-muted);
+  border: 1px solid var(--border-color);
+}
+
+.completed-list {
+  border-left: 2px solid var(--border-color);
+  padding-left: var(--spacing-md);
+}
+
+.completed-item {
+  display: flex;
+  justify-content: space-between;
+  font-size: 0.85rem;
+  margin-bottom: 4px;
+}
+
+.completed-winrate {
+  font-weight: 600;
+}
+
+.completed-trades {
+  color: var(--text-muted);
+  font-size: 0.75rem;
+}
+
+.orchestrator-footer {
+  display: flex;
+  justify-content: space-between;
+  font-size: 0.75rem;
+  color: var(--text-muted);
+  margin-top: var(--spacing-lg);
+  padding-top: var(--spacing-sm);
+  border-top: 1px solid var(--border-color);
+}
+
+/* ============================================
+   Multi-Timeframe Styles
+   ============================================ */
+
+.card__badge {
+  font-size: 0.85rem;
+  font-weight: 600;
+  padding: 2px 8px;
+  background: var(--bg-tertiary);
+  border-radius: 4px;
+}
+
+.mtf-confluence {
+  margin-bottom: var(--spacing-lg);
+  padding: var(--spacing-md);
+  background: var(--bg-tertiary);
+  border-radius: var(--radius-md);
+}
+
+.confluence-header {
+  display: flex;
+  justify-content: space-between;
+  margin-bottom: var(--spacing-sm);
+  font-size: 0.9rem;
+}
+
+.confluence-bar {
+  height: 12px;
+  background: var(--bg-secondary);
+  border-radius: 6px;
+  position: relative;
+  margin-bottom: var(--spacing-xs);
+  overflow: hidden;
+}
+
+.confluence-fill {
+  height: 100%;
+  transition: width 0.3s ease;
+}
+
+.confluence-threshold {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 2px;
+  background: rgba(255, 255, 255, 0.2);
+  z-index: 1;
+}
+
+.confluence-info {
+  text-align: right;
+  font-size: 0.75rem;
+  color: var(--text-muted);
+}
+
+.mtf-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: var(--spacing-sm);
+  margin-bottom: var(--spacing-md);
+}
+
+.mtf-cell {
+  background: var(--bg-tertiary);
+  border-radius: var(--radius-md);
+  padding: var(--spacing-sm);
+  border: 1px solid var(--border-color);
+}
+
+.mtf-cell-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: var(--spacing-sm);
+  padding-bottom: 4px;
+  border-bottom: 1px solid var(--border-color);
+}
+
+.mtf-tf {
+  font-weight: 600;
+  color: var(--text-secondary);
+  font-size: 0.9rem;
+}
+
+.mtf-direction {
+  font-weight: 900;
+  font-size: 1.1rem;
+}
+
+.mtf-cell-body {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.mtf-metric {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 0.75rem;
+}
+
+.mtf-label {
+  color: var(--text-muted);
+}
+
+.mtf-value {
+  font-family: var(--font-mono);
+  font-weight: 500;
+}
+
+.mtf-bar-container {
+  width: 40px;
+  height: 4px;
+  background: var(--bg-secondary);
+  border-radius: 2px;
+  overflow: hidden;
+}
+
+.mtf-bar {
+  height: 100%;
+  border-radius: 2px;
+}
+
+.mtf-reasoning {
+  padding: var(--spacing-sm);
+  background: var(--bg-secondary);
+  border-radius: var(--radius-sm);
+  font-size: 0.7rem;
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+
